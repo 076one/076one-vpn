@@ -325,6 +325,8 @@ public class MainActivity extends Activity {
                 && !(Core.MODE_BRIDGE.equals(Core.mode(this)) && Bridges.viaPsiphon(this))) register(L.t("خودکار: حساب WARP روی این گوشی نیست"));
         else Servers.maybeAutoScan(this, L.t("فهرست خالی یا قدیمی‌تر از ۶ ساعت"));
         tick.run();
+        // v1.8.5: quiet update check, at most once a day (Settings → "check automatically"); a dialog only when newer
+        ui.postDelayed(() -> { if (!isFinishing()) Updater.quietCheck(this); }, 8000);
     }
 
     @Override

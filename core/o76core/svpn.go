@@ -717,6 +717,20 @@ func (t *stun) health(limit time.Duration, stop <-chan struct{}) {
 	}
 }
 
+// tolerantOpts: v1.8.5 -tolerant (Firefox mode): the v1.8.3 chain-mode health rules (3 failed probes in a row on
+// top of the no-data window, overlapping probes, any relayed byte = liveness, no FAILS lines) without the chain-only
+// IPv6 / private-destination refusals. The probe timeout is 8 s (DoH through the Firefox proxy needs a TLS handshake).
+func tolerantOpts(ho healthOpts, set map[string]bool) healthOpts {
+	if !set["needfails"] {
+		ho.needFails = 3
+	}
+	if !set["probeto"] {
+		ho.probeTimeout = 8 * time.Second
+	}
+	ho.maxInflight, ho.anyRx, ho.quietFails = 3, true, true
+	return ho
+}
+
 func cmdSVPN(args []string) {
 	fs := flag.NewFlagSet("svpn", flag.ExitOnError)
 	sock := fs.String("sock", "", "unix socket path to receive TUN fd")
@@ -729,6 +743,7 @@ func cmdSVPN(args []string) {
 	probeTO := fs.Duration("probeto", 0, "per DNS probe timeout (0 = 12s)")
 	no6 := fs.Bool("no6", false, "refuse IPv6 TCP at once (RST) and answer AAAA with no records")
 	fastFail := fs.Bool("fastfail", false, "refuse private/reserved IPv4 destinations at once (RST)")
+	tolerant := fs.Bool("tolerant", false, "v1.8.5 Firefox mode: chain-style stall tolerance (-nodata 50s -needfails 3 -probeto 8s, overlapping probes, any rx = liveness, no FAILS lines) without -no6/-fastfail")
 	_ = fs.Parse(args)
 	if *socks == "" {
 		fail("-socks required")
@@ -753,9 +768,14 @@ func cmdSVPN(args []string) {
 			*fastFail = true
 		}
 		ho.maxInflight, ho.anyRx, ho.quietFails = 3, true, true
+	} else if *tolerant {
+		ho = tolerantOpts(ho, set)
+		if !set["nodata"] {
+			*noData = 50 * time.Second
+		}
 	}
-	out("OPTS svpn socks=%s mtu=%d nodata=%v dnsudp=%v chain=%v needfails=%d probeto=%v no6=%v fastfail=%v",
-		*socks, *mtu, *noData, *dnsUDP, *chain, ho.needFails, ho.probeTimeout, *no6, *fastFail)
+	out("OPTS svpn socks=%s mtu=%d nodata=%v dnsudp=%v chain=%v tolerant=%v needfails=%d probeto=%v no6=%v fastfail=%v",
+		*socks, *mtu, *noData, *dnsUDP, *chain, *tolerant, ho.needFails, ho.probeTimeout, *no6, *fastFail)
 	fd, err := receiveFd(*sock)
 	if err != nil {
 		fail("tun fd: %v", err)

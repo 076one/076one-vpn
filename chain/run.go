@@ -417,6 +417,7 @@ func (cr *chainRun) keepAlive(stop <-chan struct{}, every time.Duration) {
 		ms, err := dnsViaSocks(cr.outPort, 6*time.Second)
 		if err != nil {
 			fails++
+			say("KA %d", fails) // v1.8.5: consecutive keep-alive failures (0 = ok), read by the app's stall switch
 			if fails <= 3 || fails%10 == 0 {
 				say("WLOG keepalive fail #%d: %s", fails, oneLine(err.Error()))
 			}
@@ -424,9 +425,21 @@ func (cr *chainRun) keepAlive(stop <-chan struct{}, every time.Duration) {
 		}
 		if fails > 0 {
 			say("WLOG keepalive ok %d ms after %d fails", ms, fails)
+			say("KA 0")
 		}
 		fails = 0
 	}
+}
+
+// isRefused: the proxy actively refused the TCP connection (nothing listens / it rejects us).
+func isRefused(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, syscall.ECONNREFUSED) {
+		return true
+	}
+	return strings.Contains(strings.ToLower(err.Error()), "connection refused")
 }
 
 var runMu sync.Mutex
@@ -445,6 +458,7 @@ func cmdRun(args []string) int {
 	pool := fs.Int("psipool", 2, "Psiphon tunnels kept in parallel (warm standby)")
 	ka := fs.Duration("keepalive", 22*time.Second, "keep-alive request through the chain (0 = off)")
 	upArg := fs.String("upstream", "", "v1.8.4: bridge proxy URL (or @file) -> Psiphon only, no Xray")
+	upTries := fs.Int("uptries", 3, "v1.8.5: bridge proxy checks before CONFIG_ERR (a refused connection is never retried)")
 	fs.Parse(args)
 	setupDNS(*dns)
 
@@ -480,7 +494,9 @@ func cmdRun(args []string) int {
 			if err == nil {
 				break
 			}
-			if try >= 3 {
+			// v1.8.5: a proxy that refuses the connection is skipped by the app in favour of the next healthy
+			// bridge, so it is not retried here
+			if try >= max(1, *upTries) || isRefused(err) {
 				say("CONFIG_ERR bridge %s: %s", up.Key(), oneLine(err.Error()))
 				return 3
 			}

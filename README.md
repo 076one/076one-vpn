@@ -1,7 +1,11 @@
 # 076one VPN (Android)
 
-**Download:** [release/076one-v1.8.4.apk](https://github.com/076one/076one-vpn/raw/main/release/076one-v1.8.4.apk) — v1.8.4 (versionCode 18), Android 5.0+ (arm64-v8a, armeabi-v7a).
-SHA-256: see `release/076one-v1.8.4.apk.sha256`. Signing certificate SHA-256: `ec956e98caa16d80234dcb3f1e9b8b66fa9e14f8a78f71702142ad0024116ee8`.
+**Download v1.8.5** (versionCode 19, Android 5.0+):
+- [arm64-v8a (most phones)](https://github.com/076one/076one-vpn/raw/main/release/076one-v1.8.5-arm64-v8a.apk)
+- [armeabi-v7a (older 32-bit phones)](https://github.com/076one/076one-vpn/raw/main/release/076one-v1.8.5-armeabi-v7a.apk)
+- [universal (both)](https://github.com/076one/076one-vpn/raw/main/release/076one-v1.8.5.apk)
+
+SHA-256 files are next to each APK in `release/`; `release/latest.json` feeds the in-app updater. Signing certificate SHA-256: `ec956e98caa16d80234dcb3f1e9b8b66fa9e14f8a78f71702142ad0024116ee8`.
 
 Licences of bundled components: psiphon-tunnel-core and libfpn GPL-3.0, Aether AGPL-3.0, Xray-core MPL-2.0, warp-plus MIT, Cinzel OFL — see `android/assets/licenses/`.
 Build: `KS_PASS=... ./build.sh` with your own keystore at `android/o76one-release.jks` (not included).
@@ -21,7 +25,7 @@ src/
     AndroidManifest.xml
     java/com/o76one/app/       MainActivity (Persian RTL UI), O76VpnService (VpnService), Core (helpers)
     res/mipmap-*/ic_launcher.png
-    o76one-release.jks         signing key (store/key password: o76one-pass, alias o76one) - keep it to sign updates
+    o76one-release.jks         signing key (not included; alias o76one) - keep it to sign updates
   core/                        usque (MIT, github.com/Diniboy1123/usque @ 6aa03fc) + o76core/main.go (our CLI core)
 ```
 
@@ -430,3 +434,58 @@ Xray; a dead bridge fails the recovery at once), unlimited reconnects with 2/5/1
 Tests: `go test ./chain` (new `TestParseUpstream`, `TestUpstreamDialers`: HTTP CONNECT with auth, SOCKS4, the SOCKS4
 adapter), `go test ./o76core`; the live test `TestChainStallLive` now also takes `O76_CHAIN_UPSTREAM=<proxy url>` (Bridge +
 Psiphon; `O76_SS_PID` = the proxy's pid). `test/testproxy.py` now sends `Proxy-Authenticate` + `Connection: close` with its 407.
+
+## v1.8.5 (versionCode 19) — bridge stall switch, Firefox tolerance, in-app updater
+Driven by a phone log from Iran (2026-11-24, v1.8.4): through Bridge + Psiphon the public proxy stalled ~75 s (keep-alive
+and DNS probe failing, Psiphon tunnels down to 0, then recovered by itself) and failover never triggered (it needed 2 failed
+recoveries); the bridge's proxy check refused twice before answering; Firefox mode saw NODATA every 1–2 min and gave up
+after 3 reconnects.
+1. **Bridge + Psiphon stall switch**: svpn runs with `-chain -nodata 40s` (3 failed probes still required). On NODATA, when
+   libchain's own keep-alive has failed too (new `KA n` line = consecutive keep-alive failures; keep-alive every 15 s in
+   bridge mode) or Psiphon has 0 tunnels, the app switches **at once, without backoff** to the next bridge: the **warm
+   standby** if its check is < 3 min old, else the next bridge that passed the last Psiphon test (not tried this round),
+   else any passed one. Otherwise (keep-alive still passing / no other bridge) the v1.8.3/1.8.4 Psiphon recovery runs.
+   Logged as «تعویض فوری پل (بدون داده ۴۰ ثانیه)» / `WLOG bridge+psiphon stall switch …`. Session only
+   (`Bridges.sessionKey`); the pin and saved results are unchanged.
+   - **Warm standby**: every 60 s (15 s after connect, 10 s after a switch) a proxy handshake + TLS abroad check of up to 3
+     other passed bridges (`libchain ptest -real 0`, stage 1 only, 6 s); the fastest that answers is the standby
+     (`WLOG bridge+psiphon standby: …`). A pre-started second Psiphon was judged too costly (a second controller with its
+     own pool, data and battery); Psiphon's data store keeps server affinity, so the restart on the standby is a few seconds.
+   - **Refusing bridges are skipped**: `libchain run -upstream … -uptries 1` (new flag, default 3) checks the proxy once,
+     and a "connection refused" is never retried even with more tries. A CONFIG_ERR at connect time
+     (`Chain.BridgeRefused`) puts the bridge on this session's skip list and the next healthy bridge starts at once
+     (no backoff). When no healthy bridge is left the skip list is cleared and the normal backoff/failover applies.
+2. **Firefox mode tolerance** (libfpn, Predator core): svpn `-tolerant` (new): NODATA only after 50 s without data **and** 3
+   failed probes in a row, overlapping 8 s probes, any relayed byte = liveness, no FAILS lines; IPv6 kept (unlike `-chain`).
+   libfpn `run -keepalive 20s` (new): TLS handshake to 1.1.1.1:443 through its own SOCKS port (logged only on failure /
+   recovery). **Never gives up**: on NODATA or libfpn exiting only libfpn is restarted, **on the same SOCKS port** (svpn and
+   the TUN keep running; `Fox.stopWait` kills the old process within ~1 s), after the backoff 2/5/10/20/30 s shown as
+   «Firefox: اتصال دوباره #n — x ثانیه دیگر»; a failed libfpn-only restart falls back to the full restart (libfpn + svpn,
+   TUN kept), which also never gives up. The counters reset when data flows (`STATE up`). Only a signed-out account (or an
+   empty monthly quota) stops it with an error. The initial connect retries the same way.
+3. **In-app updater** (`Updater.java`, `UpdCore.java`, `ApkProvider.java`): Settings → «بررسی به‌روزرسانی» / Check for update /
+   检查更新, plus a quiet check at app start at most once a day (checkbox in Settings, default on; a dialog only when a newer
+   version exists). Manifest `https://github.com/076one/076one-vpn/raw/main/release/latest.json` (redirects to
+   raw.githubusercontent.com). While the VPN is up in a mode with a local SOCKS5 port (Config/Bridge + Psiphon, Firefox,
+   Aether, warp+) the manifest and APK are fetched **through the app's own tunnel** (own SOCKS5 client, host name sent to the
+   proxy, HTTP/1.1 with redirects / chunked); otherwise, or if that fails, directly. WARP / Bridge + WARP modes have no local
+   SOCKS port, so the download goes direct there (the app is excluded from its own VPN). The APK for the phone is picked
+   from `Build.SUPPORTED_ABIS`: arm64-v8a → arm64 file, else armeabi-v7a file, universal as fallback. Before installing:
+   size, **SHA-256** from latest.json, full **v1 (JAR) signature verification** with the signer certificate equal to the
+   installed app's own (PackageManager GET_SIGNING_CERTIFICATES on 28+, GET_SIGNATURES before), package name and
+   versionCode. Then the system installer: `content://com.o76one.app.apk/update/<file>` (own minimal read-only provider
+   instead of androidx FileProvider, read grant only) on Android 7+, `file://` from the external cache on 5–6; on 8+ the
+   «install unknown apps» permission is asked for first (the verified download is reused when the user comes back).
+   Permission `REQUEST_INSTALL_PACKAGES`. Progress (bytes, speed, route) and clear errors in dialogs.
+   - **latest.json** (written by `tools/latest_json.py`, notes in `tools/notes-<ver>.json`):
+     `{versionCode, versionName, minSdk, apk, url, size, sha256 (universal at top level), signerSha256,
+     apks: [{abi: universal|arm64-v8a|armeabi-v7a, apk: "release/<file>", url, size, sha256}], notes: {fa, en, zh}}`.
+     Release files go to `release/076one-v<ver>[-<abi>].apk` + `release/latest.json` on branch main.
+4. **Per-ABI APKs**: build.sh now also writes `076one-v<ver>-arm64-v8a.apk` (arm64 libs + Aether) and
+   `076one-v<ver>-armeabi-v7a.apk` (armv7 libs only; Aether is hidden because libaether.so is absent) from the same build,
+   same signer and versionCode, each with `.sha256`; `SPLITS=0` skips them. No v4 / `.idsig`.
+Tests: `go test ./o76core` (new `TestTolerantOpts`), `go test ./chain` (new `TestIsRefusedBridge`); live
+`TestBridgeSwitchLive` (env-gated: two local proxies + a refused port, real libchain + svpn + Psiphon; SIGSTOP of bridge A;
+checks the warm-standby check, the refused-bridge fast fail, NODATA timing with failed keep-alive, and data through bridge B
+on the same TUN); `../test/updater/` (desktop JVM: latest.json parse + ABI pick, HTTP redirect / chunked / SOCKS5 download
+from a local server, SHA-256 and v1 signer checks incl. tampered APK).

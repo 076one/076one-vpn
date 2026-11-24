@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/binary"
+	"errors"
 	"io"
 	"net"
 	"net/http"
@@ -202,4 +203,25 @@ func TestUpstreamDialers(t *testing.T) {
 		t.Fatalf("adapter: %v", err)
 	}
 	roundTrip(t, c)
+}
+
+// v1.8.5: a refusing bridge proxy is not retried (the app skips to the next healthy bridge)
+func TestIsRefusedBridge(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	addr := ln.Addr().String()
+	ln.Close() // nothing listens there now -> connection refused
+	u, err := parseUpstream("socks5://" + addr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = u.check(3 * time.Second)
+	if !isRefused(err) {
+		t.Fatalf("want refused, got %v", err)
+	}
+	if isRefused(errors.New("timeout (no answer through the config)")) || isRefused(nil) {
+		t.Fatal("timeout / nil must not count as refused")
+	}
 }

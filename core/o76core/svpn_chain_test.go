@@ -259,3 +259,15 @@ func TestChainFastFail(t *testing.T) {
 		t.Fatal("A question must not be answered locally")
 	}
 }
+
+// v1.8.5: -tolerant (Firefox mode) = chain-mode health rules without the chain-only IPv6/private refusals
+func TestTolerantOpts(t *testing.T) {
+	ho := tolerantOpts(healthOpts{}, map[string]bool{})
+	if ho.needFails != 3 || ho.probeTimeout != 8*time.Second || ho.maxInflight != 3 || !ho.anyRx || !ho.quietFails {
+		t.Fatalf("tolerant opts: %+v", ho)
+	}
+	ho = tolerantOpts(healthOpts{needFails: 5, probeTimeout: time.Second}, map[string]bool{"needfails": true, "probeto": true})
+	if ho.needFails != 5 || ho.probeTimeout != time.Second {
+		t.Fatalf("explicit flags must win: %+v", ho)
+	}
+}

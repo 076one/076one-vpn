@@ -157,6 +157,13 @@ public final class Fox {
         }
     }
 
+    /** v1.8.5: the monthly quota is used up ("limit 0 reset"); reconnecting cannot help then */
+    static boolean quotaEmpty(String q) {
+        if (q == null || q.isEmpty()) return false;
+        String[] s = q.split(" ");
+        try { return s.length > 1 && Long.parseLong(s[1]) <= 0; } catch (Exception e) { return false; }
+    }
+
     /** "limit remaining reset" (bytes, reset as the service gives it) -> Persian */
     static String quotaFa(String q) {
         String[] s = q.split(" ");
@@ -169,12 +176,21 @@ public final class Fox {
     }
 
     public static Run startTunnel(Context c, Core.Cancel cancelled) throws Exception {
+        return startTunnel(c, cancelled, 0);
+    }
+
+    /**
+     * v1.8.5: port > 0 restarts the core on the same SOCKS port, so o76core svpn (and the TUN) keep running while
+     * only libfpn is restarted. Also sends a keep-alive (TLS handshake through its own SOCKS port) every 20 s.
+     */
+    public static Run startTunnel(Context c, Core.Cancel cancelled, int port) throws Exception {
         if (!signedIn(c)) throw new Exception(L.t("برای حالت Firefox اول در صفحهٔ «Firefox» با حساب فایرفاکس خودتان وارد شوید"));
         killStale(c);
         final Run r = new Run();
-        r.port = Aether.freePort();
+        r.port = port > 0 ? port : Aether.freePort();
         List<String> a = base(c, "run");
         a.add("-port"); a.add(String.valueOf(r.port));
+        a.add("-keepalive"); a.add("20s");
         a.add("-transport"); a.add(transport(c));
         a.add("-server"); a.add(server(c));
         Core.log("Firefox v" + VERSION + L.t(": شروع ") + transportLabel(transport(c)) + L.t(" مکان=") + server(c) + " socks=127.0.0.1:" + r.port
@@ -204,6 +220,32 @@ public final class Fox {
         Core.log(L.t("Firefox: آماده در ") + (System.currentTimeMillis() - r.startedAt) / 1000 + L.t(" ثانیه — ") + r.proto.toUpperCase()
                 + (r.loc.isEmpty() ? "" : " " + r.loc) + (r.exit.isEmpty() ? "" : L.t(" — خروجی ") + r.exit));
         return r;
+    }
+
+    /**
+     * v1.8.5: stops the core and waits (max ~1.2 s) until it is gone, killing it if SIGTERM was not enough, so a
+     * restart on the same SOCKS port can follow at once.
+     */
+    public static void stopWait(Run r) {
+        if (r == null || r.p == null) return;
+        try { r.p.destroy(); } catch (Exception ignored) { }
+        long end = System.currentTimeMillis() + 800;
+        while (System.currentTimeMillis() < end) {
+            try { r.p.exitValue(); return; } catch (IllegalThreadStateException e) {
+                try { Thread.sleep(50); } catch (InterruptedException ie) { break; }
+            } catch (Exception e) { return; }
+        }
+        try {
+            java.lang.reflect.Field f = r.p.getClass().getDeclaredField("pid");
+            f.setAccessible(true);
+            android.os.Process.killProcess(f.getInt(r.p));
+        } catch (Exception ignored) { }
+        end = System.currentTimeMillis() + 400;
+        while (System.currentTimeMillis() < end) {
+            try { r.p.exitValue(); return; } catch (IllegalThreadStateException e) {
+                try { Thread.sleep(50); } catch (InterruptedException ie) { return; }
+            } catch (Exception e) { return; }
+        }
     }
 
     public static void stop(Run r) {

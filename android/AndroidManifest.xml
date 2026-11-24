@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="com.o76one.app"
-    android:versionCode="18"
-    android:versionName="1.8.4">
+    android:versionCode="19"
+    android:versionName="1.8.5">
 
     <uses-sdk android:minSdkVersion="21" android:targetSdkVersion="33" />
 
@@ -10,6 +10,8 @@
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- v1.8.5 in-app updater: opens the system installer for a downloaded, verified update -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 
     <application
         android:name=".O76App"
@@ -82,5 +84,12 @@
                 <action android:name="android.net.VpnService" />
             </intent-filter>
         </service>
+
+        <!-- v1.8.5: serves the verified update APK to the system installer (content:// URI, read grant only) -->
+        <provider
+            android:name=".ApkProvider"
+            android:authorities="com.o76one.app.apk"
+            android:exported="false"
+            android:grantUriPermissions="true" />
     </application>
 </manifest>

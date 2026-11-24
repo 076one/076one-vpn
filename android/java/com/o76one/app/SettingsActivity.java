@@ -155,6 +155,19 @@ public class SettingsActivity extends Activity {
             finish();
         });
 
+        // ---- v1.8.5 Update ----
+        root.addView(text(L.t("به‌روزرسانی"), 17, true));
+        root.addView(text(L.t("نسخهٔ تازه از مخزن عمومی GitHub (076one/076one-vpn) دریافت می‌شود؛ وقتی VPN وصل است از داخل تونل خود برنامه. ")
+                + L.t("پیش از نصب، SHA-256 و امضای فایل با امضای همین برنامه مقایسه می‌شود."), 13, false));
+        Button updBtn = button(L.t("بررسی به‌روزرسانی"), ACCENT, R.drawable.ic_download);
+        updBtn.setOnClickListener(v -> Updater.check(this));
+        root.addView(MainActivity.Ui.row(this, updBtn));
+        android.widget.CheckBox updAuto = new android.widget.CheckBox(this);
+        updAuto.setText(L.t("بررسی خودکار روزی یک بار هنگام باز شدن برنامه"));
+        updAuto.setChecked(Updater.autoCheck(this));
+        updAuto.setOnCheckedChangeListener((cb, on) -> Updater.setAutoCheck(this, on));
+        root.addView(updAuto);
+
         // ---- v1.6 About ----
         root.addView(text(L.t("درباره"), 17, true));
         String ver = "";

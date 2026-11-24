@@ -19,7 +19,9 @@ D8_JAR="${D8_JAR:-/tmp/t/btj/android-14/lib/d8.jar}"
 APKSIGNER_JAR="${APKSIGNER_JAR:-/tmp/t/btj/android-14/lib/apksigner.jar}"
 KS="$HERE/android/o76one-release.jks"
 : "${KS_PASS:?set KS_PASS to your keystore password}"
-APK_NAME="${APK_NAME:-076one-v1.8.4.apk}"
+APK_NAME="${APK_NAME:-076one-v1.8.5.apk}"
+# v1.8.5: besides the universal APK, one APK per ABI from the same build (same signer / versionCode); SPLITS=0 skips them
+SPLITS="${SPLITS:-1}"
 MIN_SDK=21
 # v1.6: Aether v2.4.0 (CluvexStudio, AGPL-3.0), official static musl arm64 build, unmodified; arm64-v8a only
 AETHER_SO="$HERE/android/jniLibs/arm64-v8a/libaether.so"
@@ -74,17 +76,34 @@ echo "== java"
   --output "$B/dex" $(find "$B/classes" -name '*.class')
 
 echo "== package"
-cp "$B/base.apk" "$B/unsigned.apk"
-( cd "$B/dex" && zip -q -X "$B/unsigned.apk" classes.dex )
-( cd "$B" && zip -q -X -r "$B/unsigned.apk" lib )
-"$ZIPALIGN" -f -p 4 "$B/unsigned.apk" "$B/aligned.apk"
+# sign_apk <unsigned.apk> <out name>: zipalign, sign v1+v2+v3 (no v4 / .idsig), verify, .sha256
+sign_apk() {
+  "$ZIPALIGN" -f -p 4 "$1" "$B/aligned.apk"
+  "$J/java" -jar "$APKSIGNER_JAR" sign --ks "$KS" --ks-pass env:KS_PASS --key-pass env:KS_PASS --ks-key-alias o76one \
+    --min-sdk-version $MIN_SDK --v1-signing-enabled true --v2-signing-enabled true --v3-signing-enabled true \
+    --v4-signing-enabled false --out "$OUT/$2" "$B/aligned.apk"
+  rm -f "$OUT/$2.idsig"
+  "$J/java" -jar "$APKSIGNER_JAR" verify --verbose --min-sdk-version $MIN_SDK "$OUT/$2"
+  ( cd "$OUT" && sha256sum "$2" > "$2.sha256" )
+  echo "APK: $OUT/$2"
+}
 
 # updates must be signed with the same key (signer cert SHA-256 ec956e98…): never create a new keystore here
 [ -f "$KS" ] || { echo "missing $KS (release keystore)"; exit 1; }
 export KS_PASS
-"$J/java" -jar "$APKSIGNER_JAR" sign --ks "$KS" --ks-pass env:KS_PASS --key-pass env:KS_PASS --ks-key-alias o76one \
-  --min-sdk-version $MIN_SDK --v1-signing-enabled true --v2-signing-enabled true --v3-signing-enabled true \
-  --v4-signing-enabled false --out "$OUT/$APK_NAME" "$B/aligned.apk"
-"$J/java" -jar "$APKSIGNER_JAR" verify --verbose --min-sdk-version $MIN_SDK "$OUT/$APK_NAME"
-( cd "$OUT" && sha256sum "$APK_NAME" > "$APK_NAME.sha256" )
-echo "APK: $OUT/$APK_NAME"
+
+# universal: both ABIs
+cp "$B/base.apk" "$B/unsigned.apk"
+( cd "$B/dex" && zip -q -X "$B/unsigned.apk" classes.dex )
+( cd "$B" && zip -q -X -r "$B/unsigned.apk" lib )
+sign_apk "$B/unsigned.apk" "$APK_NAME"
+
+if [ "$SPLITS" = 1 ]; then
+  # per-ABI: arm64-v8a (all cores + Aether) and armeabi-v7a (no Aether: the app hides that mode when libaether.so is absent)
+  for abi in arm64-v8a armeabi-v7a; do
+    cp "$B/base.apk" "$B/unsigned-$abi.apk"
+    ( cd "$B/dex" && zip -q -X "$B/unsigned-$abi.apk" classes.dex )
+    ( cd "$B" && zip -q -X -r "$B/unsigned-$abi.apk" "lib/$abi" )
+    sign_apk "$B/unsigned-$abi.apk" "${APK_NAME%.apk}-$abi.apk"
+  done
+fi

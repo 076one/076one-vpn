@@ -86,6 +86,17 @@ public class O76VpnService extends VpnService {
     private long wUpAt, wRestartAt;
     private int fRestarts;
     private volatile long fUpAt, fRestartAt;
+    // v1.8.5 Firefox: never gives up (backoff 2/5/10/20/30 s), libfpn alone is restarted on the same SOCKS port
+    private volatile int fAttempts;        // restarts in a row without data (backoff index, "reconnecting #n")
+    private volatile boolean fRecovering;  // a libfpn-only restart is running
+    private volatile boolean fFatal;       // signed out / quota used up: reconnecting cannot help
+    // v1.8.5 Bridge + Psiphon: switch to a warm standby bridge after a 40 s stall; refused bridges are skipped
+    private volatile String bWarmKey = "";
+    private volatile long bWarmAt, bWarmMs, bWarmDue;
+    private final java.util.HashSet<String> bRefused = new java.util.HashSet<>();
+    private volatile boolean cNoDelay;     // next chain start without backoff (bridge switch / refused bridge)
+    /** v1.8.5: local SOCKS5 port of the running tunnel (SOCKS-based modes), 0 = none; the updater downloads through it */
+    public static volatile int socksPort;
     private volatile long aUpAt, aRestartAt;
     private int aRestarts;
     private volatile boolean stopping;
@@ -162,6 +173,14 @@ public class O76VpnService extends VpnService {
         foxQuota = "";
         aRestarts = 0;
         fRestarts = 0;
+        fAttempts = 0;
+        fRecovering = false;
+        fFatal = false;
+        bWarmKey = "";
+        bWarmAt = bWarmMs = bWarmDue = 0;
+        synchronized (bRefused) { bRefused.clear(); }
+        cNoDelay = false;
+        socksPort = 0;
         wRestarts = 0;
         cRestarts = 0;
         cAttempts = 0;
@@ -202,7 +221,7 @@ public class O76VpnService extends VpnService {
             } else if (viaFox) {
                 if (!Fox.available(this)) throw new Exception(L.t("هستهٔ Firefox روی این گوشی نصب نیست"));
                 stateMsg = L.t("Firefox: ورود با توکن حساب و ساخت تونل… (تا ۲ دقیقه)");
-                plan = foxPlan(myGen);
+                plan = foxStartLoop(myGen, 0, null); // v1.8.5: retries with backoff; throws when signed out / cancelled
             } else if (viaAether) {
                 if (!Aether.available(this)) throw new Exception(L.t("حالت Aether روی این گوشی در دسترس نیست (فقط arm64)"));
                 Aether.killStale(this);
@@ -265,13 +284,14 @@ public class O76VpnService extends VpnService {
             if (tun == null) throw new Exception(L.t("اجازهٔ VPN داده نشده"));
 
             if (viaBridge) startBridgeRetest(myGen);
+            if (viaBridgePsi) startBridgeStandby(myGen);
             int code = 0;
             while (!stopping && myGen == gen) {
                 switchReq = false;
                 code = runCore(plan, myGen);
                 if (stopping || myGen != gen) return;
-                if (!switchReq && viaChain) {
-                    // v1.8.3: chain mode never gives up; svpn exiting on its own is one more full restart
+                if (!switchReq && (viaChain || viaFox)) {
+                    // v1.8.3 chain / v1.8.5 Firefox: never give up; svpn exiting on its own is one more full restart
                     switchWhy = "svpn exited (code " + code + ")";
                 } else if (!switchReq) break; // core died on its own -> error below
                 if (viaWp) {
@@ -314,23 +334,26 @@ public class O76VpnService extends VpnService {
                     continue;
                 }
                 if (viaFox) {
+                    // v1.8.5: full restart (svpn died, or a libfpn-only restart failed). Never gives up: backoff
+                    // 2/5/10/20/30 s until the user disconnects; only signing out / an empty quota ends it.
+                    long w = System.currentTimeMillis() + 5000;
+                    while (fRecovering && System.currentTimeMillis() < w) Thread.sleep(100);
                     switches++;
-                    if (fUpAt > fRestartAt + 60_000) fRestarts = 0; // it worked for a while: start counting again
                     fRestarts++;
                     stopFox();
-                stopWp();
-                    Core.log(L.t("Firefox کار نکرد (") + switchWhy + L.t(")؛ اتصال دوباره #") + fRestarts);
-                    if (fRestarts > 3) {
-                        stateMsg = L.t("خطا: Firefox پس از ۳ بار اتصال دوباره هم داده رد نکرد — پروتکل یا مکان دیگری را امتحان کنید");
+                    if (fFatal) {
+                        if (!stateMsg.startsWith(L.t("خطا"))) stateMsg = L.t("خطا: ") + switchWhy;
                         break;
                     }
+                    fAttempts++;
+                    Core.log(L.t("Firefox کار نکرد (") + switchWhy + L.t(")؛ اتصال دوباره #") + fAttempts);
+                    Core.log("WLOG firefox full restart #" + fAttempts + " (libfpn + svpn; tun kept)");
                     state = ST_RECONNECTING;
-                    stateMsg = L.t("Firefox: اتصال دوباره…");
+                    stateMsg = L.t("Firefox: اتصال دوباره #") + fAttempts + "…";
                     realRtt = 0;
                     noData = false;
                     fRestartAt = System.currentTimeMillis();
-                    if (fRestarts >= 2) try { Thread.sleep(3000); } catch (InterruptedException ignored) { }
-                    plan = foxPlan(myGen);
+                    plan = foxStartLoop(myGen, 0, null);
                     if (stopping || myGen != gen) return;
                     continue;
                 }
@@ -434,9 +457,9 @@ public class O76VpnService extends VpnService {
     }
 
     /** v1.7: starts the Firefox core (own account's token) and waits for its verified tunnel + SOCKS port */
-    private Servers.Plan foxPlan(final int myGen) throws Exception {
-        Fox.Run r = Fox.startTunnel(this, () -> stopping || myGen != gen);
-        if (stopping || myGen != gen) {
+    private Servers.Plan foxPlan(final int myGen, int port, final Process svpn) throws Exception {
+        Fox.Run r = Fox.startTunnel(this, () -> stopping || myGen != gen || (svpn != null && proc != svpn), port);
+        if (stopping || myGen != gen || (svpn != null && proc != svpn)) {
             Fox.stop(r);
             throw new InterruptedException("cancelled");
         }
@@ -447,6 +470,90 @@ public class O76VpnService extends VpnService {
         p.aetherPort = r.port;
         p.fox = true;
         return p;
+    }
+
+    /**
+     * v1.8.5 Firefox: starts libfpn, retrying with backoff 2/5/10/20/30 s (shown as "reconnecting #n") until it is
+     * up or the user disconnects. Throws at once when the account is signed out or the monthly quota is used up.
+     * port > 0 / svpn != null: libfpn-only restart on the same SOCKS port (svpn keeps running); one attempt only.
+     */
+    private Servers.Plan foxStartLoop(final int myGen, int port, final Process svpn) throws Exception {
+        while (true) {
+            if (stopping || myGen != gen || (svpn != null && proc != svpn)) throw new InterruptedException("cancelled");
+            if (fAttempts > 0) {
+                long d = C_BACKOFF[Math.min(fAttempts - 1, C_BACKOFF.length - 1)];
+                Core.log("WLOG firefox reconnect #" + fAttempts + " in " + d / 1000 + " s");
+                long until = System.currentTimeMillis() + d;
+                while (System.currentTimeMillis() < until) {
+                    if (stopping || myGen != gen || (svpn != null && proc != svpn)) throw new InterruptedException("cancelled");
+                    long left = (until - System.currentTimeMillis() + 999) / 1000;
+                    stateMsg = L.t("Firefox: اتصال دوباره #") + fAttempts + L.t(" — ") + left + L.t(" ثانیه دیگر…");
+                    Thread.sleep(250);
+                }
+                stateMsg = L.t("Firefox: اتصال دوباره #") + fAttempts + "…";
+            }
+            try {
+                return foxPlan(myGen, port, svpn);
+            } catch (InterruptedException e) {
+                throw e;
+            } catch (Exception e) {
+                if (stopping || myGen != gen) throw new InterruptedException("cancelled");
+                if (!Fox.signedIn(this)) { fFatal = true; throw e; }
+                Fox.Run fr = fRun;
+                if (fr != null && Fox.quotaEmpty(fr.quota)) { fFatal = true; throw e; }
+                if (svpn != null) throw e; // libfpn-only restart: the caller falls back to a full restart
+                fAttempts++;
+                Core.log(L.t("خطا: ") + e.getMessage());
+                Core.log("WLOG firefox start failed; reconnect #" + fAttempts);
+                if (state == ST_ON) state = ST_RECONNECTING;
+            }
+        }
+    }
+
+    /**
+     * v1.8.5 Firefox: svpn saw no data (50 s + 3 failed probes) or libfpn exited. Restart only libfpn on the same
+     * SOCKS port after the backoff delay; svpn and the TUN keep running. A failed restart falls back to the full one.
+     */
+    private void foxRestart(final Process svpn, final int myGen, final String why) {
+        synchronized (this) {
+            if (fRecovering || switchReq) { Core.log("WLOG firefox " + why + " while restarting; waiting"); return; }
+            fRecovering = true;
+        }
+        new Thread(() -> {
+            try {
+                Fox.Run old = fRun;
+                int port = old != null ? old.port : 0;
+                fRun = null; // ends the old watcher
+                Fox.stopWait(old);
+                fAttempts++;
+                switches++;
+                fRestarts++;
+                state = ST_RECONNECTING;
+                realRtt = 0;
+                Core.log(L.t("Firefox کار نکرد (") + why + L.t(")؛ اتصال دوباره #") + fAttempts);
+                Core.log("WLOG firefox restart #" + fAttempts + ": " + why + " -> libfpn restart on socks port " + port + " (svpn and tun kept)");
+                fRestartAt = System.currentTimeMillis();
+                foxStartLoop(myGen, port, svpn);
+                Fox.Run r = fRun;
+                if (r != null) watchFox(r, svpn, myGen);
+                stateMsg = L.t("Firefox: دوباره وصل شد، بررسی داده…");
+                Core.log("WLOG firefox restart #" + fAttempts + " ok; waiting for data through svpn");
+            } catch (InterruptedException e) {
+                // disconnected, or svpn ended (the main loop restarts both)
+            } catch (Exception e) {
+                if (stopping || myGen != gen || proc != svpn) return;
+                Core.log(L.t("خطا: ") + e.getMessage());
+                Core.log("WLOG firefox restart failed (" + e.getMessage() + ") -> full restart");
+                if (fFatal) stateMsg = L.t("خطا: ") + e.getMessage();
+                if (!switchReq) {
+                    switchReq = true;
+                    switchWhy = "FIREFOX: " + e.getMessage();
+                    killProc();
+                }
+            } finally {
+                fRecovering = false;
+            }
+        }, "o76-fox-restart").start();
     }
 
     /** v1.8: starts warp-plus and waits for its tested tunnel + SOCKS port */
@@ -553,7 +660,12 @@ public class O76VpnService extends VpnService {
     private Servers.Plan chainStartLoop(final int myGen) throws Exception {
         while (true) {
             if (stopping || myGen != gen) throw new InterruptedException("cancelled");
-            if (cAttempts > 0) {
+            if (cAttempts > 0 && cNoDelay) {
+                // v1.8.5 Bridge + Psiphon: switching to another bridge (stall switch / refused bridge): no backoff
+                cNoDelay = false;
+                Core.log("WLOG chain reconnect #" + cAttempts + " now (bridge switch, no backoff)");
+                stateMsg = L.t("پل + سایفون: تعویض پل…");
+            } else if (cAttempts > 0) {
                 if (cFailStreak >= 2) chainFailover();
                 long d = C_BACKOFF[Math.min(cAttempts - 1, C_BACKOFF.length - 1)];
                 Core.log("WLOG chain reconnect #" + cAttempts + " in " + d / 1000 + " s");
@@ -570,6 +682,27 @@ public class O76VpnService extends VpnService {
                 return chainPlan(myGen);
             } catch (InterruptedException e) {
                 throw e;
+            } catch (Chain.BridgeRefused e) {
+                if (stopping || myGen != gen) throw new InterruptedException("cancelled");
+                // v1.8.5: the bridge failed its proxy check at connect time (e.g. refused): skip it for this
+                // session and go straight to the next healthy one instead of retrying it
+                String bad = Bridges.addrOf(e.key);
+                synchronized (bRefused) { bRefused.add(bad); }
+                synchronized (cTried) { cTried.add(bad); }
+                Core.log(L.t("خطا: ") + e.getMessage());
+                String nk = nextBridge(bad);
+                cAttempts++;
+                if (state == ST_ON) state = ST_RECONNECTING;
+                if (nk != null) {
+                    Bridges.sessionKey = nk;
+                    cNoDelay = true;
+                    Core.log(L.t("پل رد شد؛ پل سالم بعدی: ") + e.key + " ← " + nk);
+                    Core.log("WLOG bridge+psiphon: " + e.key + " failed its proxy check at connect time -> skipped (session), next healthy bridge " + nk);
+                } else {
+                    synchronized (bRefused) { bRefused.clear(); }
+                    cFailStreak++;
+                    Core.log("WLOG bridge+psiphon: " + e.key + " failed its proxy check and no other healthy bridge is left; reconnect #" + cAttempts + " with backoff");
+                }
             } catch (Exception e) {
                 if (stopping || myGen != gen) throw new InterruptedException("cancelled");
                 cFailStreak++;
@@ -640,12 +773,120 @@ public class O76VpnService extends VpnService {
     }
 
     /**
+     * v1.8.5 Bridge + Psiphon: the next bridge to switch to: the warm standby (its proxy handshake passed in the last
+     * 3 min), else the next bridge that passed the last Psiphon test (best first, not tried in this round), else any
+     * passed one. Never the current one or one that refused this session. null = none.
+     */
+    private String nextBridge(String curAddr) {
+        java.util.Set<String> refused;
+        synchronized (bRefused) { refused = new java.util.HashSet<>(bRefused); }
+        String w = bWarmKey;
+        if (!w.isEmpty() && System.currentTimeMillis() - bWarmAt < 180_000 && !Bridges.addrOf(w).equals(curAddr)
+                && !refused.contains(Bridges.addrOf(w))) return w;
+        java.util.List<JSONObject> cands = Bridges.passed(this);
+        synchronized (cTried) {
+            for (JSONObject o : cands) {
+                String a = Bridges.addrOf(o.optString("k"));
+                if (!a.equals(curAddr) && !refused.contains(a) && !cTried.contains(a)) return o.optString("k");
+            }
+        }
+        for (JSONObject o : cands) {
+            String a = Bridges.addrOf(o.optString("k"));
+            if (!a.equals(curAddr) && !refused.contains(a)) return o.optString("k");
+        }
+        return null;
+    }
+
+    /**
+     * v1.8.5 Bridge + Psiphon: NODATA after 40 s (svpn: no data and 3 failed DNS probes). When the chain's own
+     * keep-alive fails too (or Psiphon has no tunnel), switch at once to the next healthy bridge, warm standby
+     * first, instead of waiting for 2 failed recoveries. Session only; the pin and the saved results stay.
+     */
+    private boolean bridgeStallSwitch(Chain.Run r, String why) {
+        if (r == null || r.dead) return false;
+        boolean kaDead = r.kaFails >= 1 || r.tunnels == 0;
+        if (!kaDead) {
+            Core.log("WLOG bridge+psiphon " + why + ": keep-alive still passing -> psiphon recovery first");
+            return false;
+        }
+        String cur = Bridges.addrOf(r.bridgeKey);
+        String nk = nextBridge(cur);
+        if (nk == null) {
+            Core.log("WLOG bridge+psiphon " + why + ": no other healthy bridge -> psiphon recovery");
+            return false;
+        }
+        synchronized (cTried) { cTried.add(cur); }
+        Bridges.sessionKey = nk;
+        boolean warm = nk.equals(bWarmKey);
+        if (warm) bWarmKey = "";
+        bWarmDue = System.currentTimeMillis() + 10_000; // find a new standby soon
+        cNoDelay = true;
+        Core.log(L.t("تعویض فوری پل (بدون داده ۴۰ ثانیه): ") + r.bridgeKey + " ← " + nk);
+        Core.log("WLOG bridge+psiphon stall switch: " + why + ", keep-alive fails=" + r.kaFails + ", psiphon tunnels=" + r.tunnels
+                + " -> " + nk + (warm ? " (warm standby, handshake " + bWarmMs + " ms)" : " (next tested bridge)"));
+        stateMsg = L.t("پل + سایفون: تعویض پل…");
+        state = ST_RECONNECTING;
+        switchReq = true;
+        switchWhy = why + " -> bridge switch";
+        killProc();
+        return true;
+    }
+
+    /**
+     * v1.8.5 Bridge + Psiphon warm standby: every 60 s (10 s after a switch) a proxy handshake + TLS check of up to 3
+     * other bridges that passed the last Psiphon test; the fastest that answers is the standby for a stall switch.
+     */
+    private void startBridgeStandby(final int myGen) {
+        bWarmDue = System.currentTimeMillis() + 15_000;
+        new Thread(() -> {
+            while (!stopping && myGen == gen) {
+                try { Thread.sleep(1000); } catch (InterruptedException e) { return; }
+                if (System.currentTimeMillis() < bWarmDue) continue;
+                bWarmDue = System.currentTimeMillis() + 60_000;
+                if (stopping || myGen != gen || (state != ST_ON && state != ST_RECONNECTING)) continue;
+                Chain.Run r = cRun;
+                String cur = Bridges.addrOf(r != null ? r.bridgeKey : Bridges.sessionKey);
+                java.util.Set<String> refused;
+                synchronized (bRefused) { refused = new java.util.HashSet<>(bRefused); }
+                java.util.List<String> keys = new java.util.ArrayList<>(), urls = new java.util.ArrayList<>();
+                for (JSONObject o : Bridges.passed(this)) {
+                    String k = o.optString("k"), a = Bridges.addrOf(k);
+                    if (a.equals(cur) || refused.contains(a)) continue;
+                    keys.add(k);
+                    urls.add(o.optString("u", k));
+                    if (keys.size() >= 3) break;
+                }
+                if (keys.isEmpty()) {
+                    if (!bWarmKey.isEmpty()) Core.log("WLOG bridge+psiphon standby: no other tested bridge");
+                    bWarmKey = "";
+                    continue;
+                }
+                long[] ms = Chain.checkProxies(this, urls, 6);
+                if (stopping || myGen != gen) return;
+                int best = -1;
+                for (int i = 0; i < ms.length; i++) if (ms[i] > 0 && (best < 0 || ms[i] < ms[best])) best = i;
+                if (best < 0) {
+                    Core.log("WLOG bridge+psiphon standby: none of " + keys.size() + " bridge(s) answered the proxy check");
+                    bWarmKey = "";
+                    continue;
+                }
+                String k = keys.get(best);
+                if (!k.equals(bWarmKey)) Core.log("WLOG bridge+psiphon standby: " + k + " ready (handshake " + ms[best] + " ms, " + keys.size() + " checked)");
+                bWarmKey = k;
+                bWarmMs = ms[best];
+                bWarmAt = System.currentTimeMillis();
+            }
+        }, "o76-bstandby").start();
+    }
+
+    /**
      * v1.8.3: svpn reported NODATA in chain mode. First restart only the Psiphon layer inside libchain (Xray, its
      * SOCKS port and the svpn/TUN stay up); if that fails or brings no data, the full chain restarts.
      */
     private void chainNoData(final Process svpn, final int myGen, final String why) {
         if (cRecovering) { Core.log("WLOG chain " + why + " while recovering; waiting"); return; }
         final Chain.Run r = cRun;
+        if (cBridge && bridgeStallSwitch(r, why)) return; // v1.8.5: 40 s stall -> next healthy bridge at once
         if (r == null || r.dead || cPartialNoUp >= 1) {
             String w = r == null || r.dead ? "core gone" : "partial recovery brought no data";
             Core.log("WLOG chain " + why + ": " + w + " -> full chain restart");
@@ -744,10 +985,18 @@ public class O76VpnService extends VpnService {
             while (!stopping && myGen == gen && fRun == r && proc == svpn) {
                 try { Thread.sleep(1000); } catch (InterruptedException e) { return; }
                 if (!r.quota.isEmpty()) foxQuota = Fox.quotaFa(r.quota);
-                if (r.dead && !switchReq && proc == svpn) {
-                    switchReq = true;
-                    switchWhy = "FIREFOX-EXIT" + (r.err.isEmpty() ? "" : " " + r.err);
-                    killProc();
+                if (r.dead && !switchReq && proc == svpn && fRun == r) {
+                    String why = "FIREFOX-EXIT" + (r.err.isEmpty() ? "" : " " + r.err);
+                    if (!Fox.signedIn(this) || Fox.quotaEmpty(r.quota)) {
+                        // v1.8.5: reconnecting cannot help: signed out / quota used up
+                        fFatal = true;
+                        stateMsg = L.t("خطا: Firefox: ") + (r.err.isEmpty() ? L.t("حساب خارج شد یا سهمیه تمام شد") : r.err);
+                        switchReq = true;
+                        switchWhy = why;
+                        killProc();
+                    } else {
+                        foxRestart(svpn, myGen, why); // v1.8.5: libfpn only, svpn + TUN kept
+                    }
                     return;
                 }
             }
@@ -820,8 +1069,14 @@ public class O76VpnService extends VpnService {
             args.add("-mtu"); args.add(String.valueOf(Core.mtu(this)));
             if (plan.chain) {
                 // v1.8.3: tolerate short stalls (50 s window + 3 failed probes in a row), 5 s probes that overlap,
-                // any relayed byte = liveness, IPv6/private destinations refused at once
+                // any relayed byte = liveness, IPv6/private destinations refused at once.
+                // v1.8.5 Bridge + Psiphon: 40 s window; with a failing keep-alive the app switches to the next bridge
                 args.add("-chain");
+                args.add("-nodata"); args.add(cBridge ? "40s" : "50s");
+            } else if (plan.fox) {
+                // v1.8.5: Firefox gets the chain-mode tolerance (50 s + 3 failed probes, overlapping 8 s probes, any
+                // relayed byte = liveness, no FAILS) but keeps IPv6
+                args.add("-tolerant");
                 args.add("-nodata"); args.add("50s");
             } else {
                 args.add("-nodata"); args.add("30s");
@@ -857,6 +1112,7 @@ public class O76VpnService extends VpnService {
         args.add("-sock"); args.add(sock.getAbsolutePath());
         final Process p = Core.start(this, args.toArray(new String[0]));
         proc = p;
+        socksPort = aether ? plan.aetherPort : 0;
         if (aether && plan.fox && fRun != null) watchFox(fRun, p, myGen);
         else if (aether && plan.wp && wRun != null) watchWp(wRun, p, myGen);
         else if (aether && plan.chain && cRun != null) watchChain(cRun, p, myGen);
@@ -890,7 +1146,11 @@ public class O76VpnService extends VpnService {
                 state = ST_ON;
                 stateMsg = L.t("متصل");
                 stalls[0] = 0;
-                if (aether && plan.fox) fUpAt = System.currentTimeMillis();
+                if (aether && plan.fox) {
+                    fUpAt = System.currentTimeMillis();
+                    if (fAttempts > 0) Core.log("WLOG firefox data flows again (reconnects reset)");
+                    fAttempts = 0;
+                }
                 else if (aether && plan.wp) wUpAt = System.currentTimeMillis();
                 else if (aether && plan.chain) {
                     cUpAt = System.currentTimeMillis();
@@ -950,6 +1210,11 @@ public class O76VpnService extends VpnService {
                 if (myGen == gen && !stopping) {
                     if (aether && plan.chain) {
                         if (!switchReq) chainNoData(p, myGen, line);
+                    } else if (aether && plan.fox) {
+                        if (!switchReq) {
+                            stateMsg = L.t("داده رد نمی‌شود؛ اتصال دوباره Firefox…");
+                            foxRestart(p, myGen, line);
+                        }
                     } else if (pinned) {
                         stateMsg = L.t("متصل ولی داده رد نمی‌شود — ") + (bridgeInUse.isEmpty() ? L.t("سرور") : L.t("پل")) + L.t(" سنجاق‌شده است (سنجاق را بردارید تا خودکار عوض شود)");
                     } else if (!switchReq) {
@@ -1093,6 +1358,7 @@ public class O76VpnService extends VpnService {
         stopChain();
         chainStage = "";
         bridgePsi = false;
+        socksPort = 0;
         aetherExit = "";
         foxQuota = "";
         closeTun();

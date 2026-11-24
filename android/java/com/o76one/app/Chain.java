@@ -369,6 +369,8 @@ public final class Chain {
         volatile int recoverResult;
         volatile String recoverMsg = "";
         volatile int tunnels = -1;
+        /** v1.8.5: consecutive failed keep-alives through the chain ("KA n" from libchain; 0 = the last one passed) */
+        volatile int kaFails;
 
         /** sends one control line to the core's stdin (RECOVER, XRAY_RESTART, PING) */
         synchronized boolean send(String cmd) {
@@ -389,6 +391,10 @@ public final class Chain {
             if (l.startsWith("PSI_TUNNELS ")) {
                 try { tunnels = Integer.parseInt(l.substring(12).trim()); } catch (Exception ignored) { }
                 Core.log("WLOG chain psiphon tunnels=" + tunnels);
+                return;
+            }
+            if (l.startsWith("KA ")) {
+                try { kaFails = Integer.parseInt(l.substring(3).trim()); } catch (Exception ignored) { }
                 return;
             }
             if (l.startsWith("WLOG ")) { Core.log("WLOG chain: " + l.substring(5)); return; }
@@ -459,6 +465,10 @@ public final class Chain {
             lf = new File(dir(c), "run.up");
             try (FileOutputStream out = new FileOutputStream(lf)) { out.write(url.getBytes(StandardCharsets.UTF_8)); }
             a.add("-upstream"); a.add("@" + lf.getAbsolutePath()); // credentials never appear in argv
+            // v1.8.5: one proxy check only (a refusing bridge is skipped for the next healthy one, not retried);
+            // keep-alive every 15 s so a stall shows up in time for the 40 s bridge switch
+            a.add("-uptries"); a.add("1");
+            a.add("-keepalive"); a.add("15s");
         } else {
             JSONObject cfg = effective(c);
             if (cfg == null) throw new Exception(L.t("هیچ کانفیگی ذخیره نشده — در صفحهٔ «کانفیگ + سایفون» لینک بچسبانید"));
@@ -496,7 +506,7 @@ public final class Chain {
             while (!r.up) {
                 if (cancelled.getAsBoolean()) { stop(r); throw new InterruptedException("cancelled"); }
                 if (r.dead) {
-                    if (r.bridge() && !r.configErr.isEmpty()) throw new Exception(L.t("پل ") + r.bridgeKey + L.t(" کار نکرد: ") + r.configErr);
+                    if (r.bridge() && !r.configErr.isEmpty()) throw new BridgeRefused(r.bridgeKey, L.t("پل ") + r.bridgeKey + L.t(" کار نکرد: ") + r.configErr);
                     if (!r.configErr.isEmpty()) throw new Exception(L.t("کانفیگ «") + r.name + L.t("» کار نکرد: ") + r.configErr
                             + L.t(" — کانفیگ دیگری انتخاب کنید یا «تست همه» را بزنید"));
                     throw new Exception((r.bridge() ? L.t("پل + سایفون وصل نشد") : L.t("کانفیگ + سایفون وصل نشد")) + (r.err.isEmpty() ? "" : ": " + r.err));
@@ -516,6 +526,49 @@ public final class Chain {
         r.exit = r.psi ? L.t("سایفون") + (r.region.isEmpty() || "<nil>".equals(r.region) ? "" : " " + r.region) + L.t(" از طریق ") + r.name : r.name;
         Core.log(r.tag() + L.t("آماده در ") + (System.currentTimeMillis() - r.startedAt) / 1000 + L.t(" ثانیه — ") + r.exit);
         return r;
+    }
+
+    /** v1.8.5: the bridge proxy failed its check at connect time (refused / no handshake): skip it for this session */
+    public static final class BridgeRefused extends Exception {
+        public final String key;
+        BridgeRefused(String key, String msg) { super(msg); this.key = key; }
+    }
+
+    /**
+     * v1.8.5 warm standby: proxy handshake + TLS abroad through each URL ("libchain ptest -real 0": stage 1 only,
+     * no Psiphon). Blocking; returns the handshake ms per URL (-1 = failed), same order. Runs direct (the app is
+     * excluded from its own VPN), like the bridge test.
+     */
+    public static long[] checkProxies(Context c, List<String> urls, int seconds) {
+        final long[] ms = new long[urls.size()];
+        java.util.Arrays.fill(ms, -1);
+        if (urls.isEmpty() || !available(c)) return ms;
+        File f = new File(dir(c), "warm.txt");
+        try {
+            StringBuilder sb = new StringBuilder();
+            for (String u : urls) sb.append(u).append('\n');
+            try (FileOutputStream out = new FileOutputStream(f)) { out.write(sb.toString().getBytes(StandardCharsets.UTF_8)); }
+            List<String> a = new ArrayList<>();
+            a.add("ptest"); a.add("-file"); a.add(f.getAbsolutePath()); a.add("-real"); a.add("0");
+            a.add("-n"); a.add(String.valueOf(Math.max(1, urls.size()))); a.add("-hs"); a.add(String.valueOf(seconds));
+            a.add("-dir"); a.add(dir(c).getAbsolutePath());
+            a.add("-dns"); a.add(Core.systemDns(c));
+            Process p = start(c, a, false);
+            Core.pump(p, line -> {
+                if (!line.startsWith("PHS ")) return;
+                String[] k = line.split(" ");
+                try {
+                    int i = Integer.parseInt(k[1]);
+                    if (i >= 0 && i < ms.length) ms[i] = Math.max(1, Long.parseLong(k[2]));
+                } catch (Exception ignored) { }
+            });
+        } catch (Exception e) {
+            Core.log("WLOG bridge standby check: " + e.getMessage());
+        } finally {
+            //noinspection ResultOfMethodCallIgnored
+            f.delete();
+        }
+        return ms;
     }
 
     public static void stop(Run r) {
