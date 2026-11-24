@@ -1,0 +1,21 @@
+076one v1.6 — notice for the bundled Aether core
+
+The "Aether" connection mode of 076one runs Aether, a censorship circumvention client
+by CluvexStudio, as a separate program (lib/arm64-v8a/libaether.so). 076one only starts it
+and talks to its local SOCKS5 port; it is not linked into 076one.
+
+  Program:   Aether v2.4.0 (release 2026-10-24), unmodified
+  Build:     official release asset aether-linux-aarch64-musl (static, musl), only the
+             "aether" binary; pt/lyrebird and pt/psiphon-tunnel-core are NOT included
+  Tarball SHA-256: 728d1433f08fb3155ebc042299a17fc0ee1afb8ec59f87616991da0f5a24afac
+  Binary  SHA-256: a9d5e80e55b55c11566f9a7b078bf68815a3779fe450a4b344b8b96587634baf
+  Project:   https://github.com/CluvexStudio/Aether
+  Source of this exact version (Corresponding Source):
+             https://github.com/CluvexStudio/Aether/tree/v2.4.0
+             https://github.com/CluvexStudio/Aether/releases/tag/v2.4.0
+  License:   GNU Affero General Public License v3.0 (see aether-LICENSE.txt);
+             third-party notices of Aether: aether-THIRD-PARTY-NOTICES.txt
+
+"Aether" is a name of the CluvexStudio project. 076one is an independent app and is not
+made, endorsed or supported by CluvexStudio; the mode is named after the core it runs.
+Only available on 64-bit ARM (arm64-v8a) phones; hidden elsewhere.

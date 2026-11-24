@@ -1,0 +1,186 @@
+حالت «وارپ+» در 076ONE / 076ONE "WARP+" mode
+
+lib/<abi>/libwplus.so is warp-plus built from source:
+  warp-plus, Copyright (c) bepass-org contributors, MIT License (warp-plus-LICENSE.txt)
+  https://github.com/bepass-org/warp-plus  commit f70ea7e4f193717c73f9a4357cbc98d6944b36bb (2025-11-17)
+It links, among others:
+  psiphon-tunnel-core (Psiphon Inc.), GNU GPL v3 (psiphon-LICENSE.txt)
+    https://github.com/Psiphon-Labs/psiphon-tunnel-core  module version v1.0.11-0.20251029164303-aa4d266ae982
+  wireguard-go (fork vendored in warp-plus), MIT License
+
+Because the binary contains GPL-3.0 code, the whole libwplus.so is distributed under GPL-3.0. The corresponding
+source is the commit above plus the patch below (built with Go 1.24.13, CGO_ENABLED=0, -trimpath).
+Anyone who received this APK may ask for the complete source of libwplus.so.
+
+Local changes (076ONE):
+  1. warp/tls.go: WP_REG_PROXY env (socks5:// or http:// bridge) for WARP registration only.
+  2. app/wg.go + cmd/warp-plus/rootcmd.go: connection test reports its error, sleeps between tries, accepts any 2xx;
+     default test URL http://cp.cloudflare.com/generate_204 (the old URL answers 404).
+  3. go.mod: toolchain line removed (built with a local Go 1.24 toolchain).
+
+----- patch -----
+diff -ru -x .git a/app/wg.go b/app/wg.go
+--- a/app/wg.go	2026-11-22 21:59:37.164000000 +0000
++++ b/app/wg.go	2026-11-22 22:11:00.645092379 +0000
+@@ -34,11 +34,15 @@
+ 		}}
+ 		resp, err := client.Head(url)
+ 		if err != nil {
+-			l.Error("connection test failed")
++			// 076one patch: say why, and do not spin
++			l.Error("connection test failed", "error", err)
++			time.Sleep(300 * time.Millisecond)
+ 			continue
+ 		}
+-		if resp.StatusCode != http.StatusOK {
+-			l.Error("connection test failed")
++		resp.Body.Close()
++		if resp.StatusCode < 200 || resp.StatusCode > 299 {
++			l.Error("connection test failed", "status", resp.StatusCode)
++			time.Sleep(300 * time.Millisecond)
+ 			continue
+ 		}
+ 
+diff -ru -x .git a/cmd/warp-plus/rootcmd.go b/cmd/warp-plus/rootcmd.go
+--- a/cmd/warp-plus/rootcmd.go	2026-11-22 21:59:37.164000000 +0000
++++ b/cmd/warp-plus/rootcmd.go	2026-11-22 22:11:00.667821730 +0000
+@@ -128,7 +128,7 @@
+ 	})
+ 	cfg.flags.AddFlag(ff.FlagConfig{
+ 		LongName: "test-url",
+-		Value:    ffval.NewValueDefault(&cfg.testUrl, "http://connectivity.cloudflareclient.com/cdn-cgi/trace"),
++		Value:    ffval.NewValueDefault(&cfg.testUrl, "http://cp.cloudflare.com/generate_204"),
+ 	})
+ 	cfg.flags.AddFlag(ff.FlagConfig{
+ 		ShortName: 'c',
+diff -ru -x .git a/go.mod b/go.mod
+--- a/go.mod	2026-11-22 21:59:37.164000000 +0000
++++ b/go.mod	2026-11-22 22:06:35.582118342 +0000
+@@ -2,7 +2,7 @@
+ 
+ go 1.24.0
+ 
+-toolchain go1.24.3
++
+ 
+ require (
+ 	github.com/Psiphon-Labs/psiphon-tunnel-core v1.0.11-0.20251029164303-aa4d266ae982
+diff -ru -x .git a/warp/tls.go b/warp/tls.go
+--- a/warp/tls.go	2026-11-22 21:59:37.168000000 +0000
++++ b/warp/tls.go	2026-11-22 22:05:26.418704299 +0000
+@@ -1,11 +1,17 @@
+ package warp
+ 
+ import (
++	"bufio"
++	"encoding/base64"
+ 	"fmt"
+ 	"io"
+ 	"log/slog"
+ 	"net"
++	"net/http"
+ 	"net/netip"
++	"net/url"
++	"os"
++	"strings"
+ 	"time"
+ 
+ 	"github.com/avast/retry-go"
+@@ -13,6 +19,7 @@
+ 
+ 	"github.com/noql-net/certpool"
+ 	tls "github.com/refraction-networking/utls"
++	xproxy "golang.org/x/net/proxy"
+ )
+ 
+ // Dialer is a struct that holds various options for custom dialing.
+@@ -128,7 +135,7 @@
+ 		KeepAlive: 5 * time.Second,
+ 	}
+ 
+-	plainConn, err := plainDialer.Dial(network, netip.AddrPortFrom(ip, 443).String())
++	plainConn, err := rawDial(plainDialer, network, netip.AddrPortFrom(ip, 443).String())
+ 	if err != nil {
+ 		return nil, err
+ 	}
+@@ -153,7 +160,7 @@
+ 		KeepAlive: 5 * time.Second,
+ 	}
+ 
+-	plainConn, err := plainDialer.Dial(network, netip.AddrPortFrom(ip, 443).String())
++	plainConn, err := rawDial(plainDialer, network, netip.AddrPortFrom(ip, 443).String())
+ 	if err != nil {
+ 		return nil, err
+ 	}
+@@ -179,7 +186,7 @@
+ 		KeepAlive: 5 * time.Second,
+ 	}
+ 
+-	plainConn, err := plainDialer.Dial(network, netip.AddrPortFrom(ip, 443).String())
++	plainConn, err := rawDial(plainDialer, network, netip.AddrPortFrom(ip, 443).String())
+ 	if err != nil {
+ 		return nil, err
+ 	}
+@@ -261,3 +268,62 @@
+ 
+ 	return tlsConn, nil
+ }
++
++// 076one patch: when WP_REG_PROXY is set (socks5://[user:pass@]host:port, http://[user:pass@]host:port or bare
++// host:port = SOCKS5), the WARP API (registration only) is reached through that bridge instead of directly, because
++// direct registration is blocked on some Iranian networks. The WireGuard tunnel itself never uses it.
++func rawDial(d *net.Dialer, network, addr string) (net.Conn, error) {
++	pa := os.Getenv("WP_REG_PROXY")
++	if pa == "" {
++		return d.Dial(network, addr)
++	}
++	if !strings.Contains(pa, "://") {
++		pa = "socks5://" + pa
++	}
++	u, err := url.Parse(pa)
++	if err != nil {
++		return nil, err
++	}
++	switch u.Scheme {
++	case "socks5", "socks5h":
++		var auth *xproxy.Auth
++		if u.User != nil {
++			pw, _ := u.User.Password()
++			auth = &xproxy.Auth{User: u.User.Username(), Password: pw}
++		}
++		pd, err := xproxy.SOCKS5("tcp", u.Host, auth, d)
++		if err != nil {
++			return nil, err
++		}
++		return pd.Dial("tcp", addr)
++	case "http", "https":
++		c, err := d.Dial("tcp", u.Host)
++		if err != nil {
++			return nil, err
++		}
++		req := "CONNECT " + addr + " HTTP/1.1\r\nHost: " + addr + "\r\n"
++		if u.User != nil {
++			pw, _ := u.User.Password()
++			req += "Proxy-Authorization: Basic " + base64.StdEncoding.EncodeToString([]byte(u.User.Username()+":"+pw)) + "\r\n"
++		}
++		req += "\r\n"
++		_ = c.SetDeadline(time.Now().Add(10 * time.Second))
++		if _, err := c.Write([]byte(req)); err != nil {
++			c.Close()
++			return nil, err
++		}
++		br := bufio.NewReader(c)
++		resp, err := http.ReadResponse(br, &http.Request{Method: "CONNECT"})
++		if err != nil {
++			c.Close()
++			return nil, err
++		}
++		if resp.StatusCode != 200 {
++			c.Close()
++			return nil, fmt.Errorf("bridge CONNECT: %s", resp.Status)
++		}
++		_ = c.SetDeadline(time.Time{})
++		return c, nil
++	}
++	return nil, fmt.Errorf("unsupported bridge scheme %q", u.Scheme)
++}

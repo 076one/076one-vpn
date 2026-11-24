@@ -1,0 +1,104 @@
+حالت «کانفیگ + سایفون» در 076ONE / 076ONE "Config + Psiphon" mode — NOTICE
+
+lib/<abi>/libchain.so is one Go program (076one source: src/chain/main.go, links.go) built from source with
+Go 1.26.10 (CGO_ENABLED=0, -trimpath). It links:
+
+  Xray-core (Project X / XTLS), Mozilla Public License 2.0 (xray-core-LICENSE.txt)
+    https://github.com/XTLS/Xray-core  tag v26.3.27 (commit d2758a023cd7f4174a5a5fa4ff66e487d4342ba0,
+    Go module github.com/xtls/xray-core v1.260327.0). Unmodified. Source of this exact version:
+    https://github.com/XTLS/Xray-core/tree/v26.3.27
+  psiphon-tunnel-core (Psiphon Inc.), GNU GPL v3 (psiphon-LICENSE.txt)
+    https://github.com/Psiphon-Labs/psiphon-tunnel-core  commit 6f412a9e0c31c10dc9f5ce9a29f283086f89630d (2026-11-23)
+    Unmodified; its in-repo replace/dtls (pion/dtls v2 with Psiphon patches) is used as in upstream.
+  quic-go/qpack v0.6.0 (Marten Seemann), MIT License — patched, see below
+  tailscale/netlink v1.1.1-0.20211101221916-cabfb018fe85, Apache License 2.0 — patched, see below
+  and their own dependencies (see the Go module list in src/chain/go.mod / go.sum).
+
+Because the binary contains GPL-3.0 code, libchain.so as a whole is distributed under GPL-3.0; the Xray-core files
+remain under MPL-2.0 (MPL-2.0 section 3.3 allows this combination). Anyone who received this APK may ask for the
+complete corresponding source of libchain.so (076one src/chain plus the versions above).
+
+Local changes (076ONE), only to make Xray-core and psiphon-tunnel-core build into one binary:
+  1. qpack: NewDecoder accepts (and ignores) an optional emit function and DecodeFull is added, so code written for
+     qpack v0.4 (Psiphon-Labs/quic-go) and v0.6 (apernet/quic-go, used by Xray-core) builds against one copy.
+  2. tailscale/netlink: two type conversions and one extra argument for vishvananda/netlink v1.3.1 (required by
+     Xray-core) — code paths 076one never calls.
+
+----- qpack patch -----
+--- a/decoder.go	2026-11-24 07:36:49.656000000 +0000
++++ b/decoder.go	2026-11-24 07:36:49.660000000 +0000
+@@ -31,10 +31,28 @@
+ type DecodeFunc func() (HeaderField, error)
+ 
+ // NewDecoder returns a new Decoder.
+-func NewDecoder() *Decoder {
++// 076one patch: the emit argument is accepted (and ignored) so that code written for qpack v0.4
++// (Psiphon-Labs/quic-go) and for v0.6 (apernet/quic-go, used by Xray-core) builds against one copy.
++func NewDecoder(_ ...func(HeaderField)) *Decoder {
+ 	return &Decoder{}
+ }
+ 
++// DecodeFull decodes a complete header block (qpack v0.4 API, 076one compatibility patch).
++func (d *Decoder) DecodeFull(p []byte) ([]HeaderField, error) {
++	next := d.Decode(p)
++	var hfs []HeaderField
++	for {
++		hf, err := next()
++		if err == io.EOF {
++			return hfs, nil
++		}
++		if err != nil {
++			return nil, err
++		}
++		hfs = append(hfs, hf)
++	}
++}
++
+ // Decode returns a function that decodes header fields from the given header block.
+ // It does not copy the slice; the caller must ensure it remains valid during decoding.
+ func (d *Decoder) Decode(p []byte) DecodeFunc {
+
+----- tailscale/netlink patch -----
+diff -u a/qdisc_linux.go b/qdisc_linux.go
+--- a/qdisc_linux.go	2026-11-24 07:36:49.664000000 +0000
++++ b/qdisc_linux.go	2026-11-24 07:36:49.664000000 +0000
+@@ -288,10 +288,10 @@
+ 		}
+ 	case *Sfq:
+ 		opt := nl.TcSfqQoptV1{}
+-		opt.TcSfqQopt.Quantum = qdisc.Quantum
++		opt.TcSfqQopt.Quantum = uint32(qdisc.Quantum)
+ 		opt.TcSfqQopt.Perturb = int32(qdisc.Perturb)
+ 		opt.TcSfqQopt.Limit = qdisc.Limit
+-		opt.TcSfqQopt.Divisor = qdisc.Divisor
++		opt.TcSfqQopt.Divisor = uint32(qdisc.Divisor)
+ 
+ 		options = nl.NewRtAttr(nl.TCA_OPTIONS, opt.Serialize())
+ 	default:
+@@ -608,10 +608,10 @@
+ func parseSfqData(qdisc Qdisc, value []byte) error {
+ 	sfq := qdisc.(*Sfq)
+ 	opt := nl.DeserializeTcSfqQoptV1(value)
+-	sfq.Quantum = opt.TcSfqQopt.Quantum
++	sfq.Quantum = uint8(opt.TcSfqQopt.Quantum)
+ 	sfq.Perturb = uint8(opt.TcSfqQopt.Perturb)
+ 	sfq.Limit = opt.TcSfqQopt.Limit
+-	sfq.Divisor = opt.TcSfqQopt.Divisor
++	sfq.Divisor = uint8(opt.TcSfqQopt.Divisor)
+ 
+ 	return nil
+ }
+diff -u a/xfrm_policy_linux.go b/xfrm_policy_linux.go
+--- a/xfrm_policy_linux.go	2026-11-24 07:36:49.664000000 +0000
++++ b/xfrm_policy_linux.go	2026-11-24 07:36:49.664000000 +0000
+@@ -219,8 +219,8 @@
+ 
+ 	var policy XfrmPolicy
+ 
+-	policy.Dst = msg.Sel.Daddr.ToIPNet(msg.Sel.PrefixlenD)
+-	policy.Src = msg.Sel.Saddr.ToIPNet(msg.Sel.PrefixlenS)
++	policy.Dst = msg.Sel.Daddr.ToIPNet(msg.Sel.PrefixlenD, msg.Sel.Family)
++	policy.Src = msg.Sel.Saddr.ToIPNet(msg.Sel.PrefixlenS, msg.Sel.Family)
+ 	policy.Proto = Proto(msg.Sel.Proto)
+ 	policy.DstPort = int(nl.Swap16(msg.Sel.Dport))
+ 	policy.SrcPort = int(nl.Swap16(msg.Sel.Sport))

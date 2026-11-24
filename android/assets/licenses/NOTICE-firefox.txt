@@ -1,0 +1,15 @@
+076one — Firefox mode (v1.7)
+
+lib/<abi>/libfpn.so is a separate program built from:
+  * Predator VPN core v2.0.7 (android/core), Copyright (c) Erfan Tahvilian and contributors,
+    GPL-3.0-or-later, https://github.com/erfan-tahvilian/PredatorVPN (tag v2.0.7), used unmodified;
+  * a small command-line front (main.go, GPL-3.0-or-later), whose full source is included next to this notice
+    (firefox-mode-libfpn-main.go.txt); build: go build -tags with_gvisor with a replace directive pointing
+    foxvpn/android/core at the Predator VPN v2.0.7 android/core directory;
+  * their Go dependencies (sing-box, quic-go, golang.org/x/*) under their own licenses.
+
+The full GPL-3.0 text is in predator-LICENSE.txt. You may redistribute and modify libfpn under GPL-3.0-or-later.
+
+The rest of 076one talks to libfpn only through its command line and a local SOCKS5 port.
+Neither 076one nor Predator VPN is affiliated with or endorsed by Mozilla. Firefox is a trademark of the Mozilla
+Foundation. The mode signs in to the user's own Firefox account; it never creates accounts.
