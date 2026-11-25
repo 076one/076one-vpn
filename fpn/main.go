@@ -352,6 +352,7 @@ func run(b *mobile.Backend, h *host, port int, transport, server string, recover
 	var upOnce sync.Once
 	connected := false
 	var lastStat time.Time
+	lastQuota := ""
 	h.mu.Lock()
 	h.onState = func(s map[string]any) {
 		conn, _ := s["connection"].(string)
@@ -368,10 +369,15 @@ func run(b *mobile.Backend, h *host, port int, transport, server string, recover
 					exit = fmt.Sprintf("%v %v", e["ip"], e["country"])
 				}
 				out("UP %v|%s|%s", s["protocol"], strings.TrimSpace(loc), strings.TrimSpace(exit))
-				if q, ok := s["quota"].(map[string]any); ok {
-					out("QUOTA %v %v %v", q["limit"], q["remaining"], q["reset"])
-				}
+				go quotaLoop(b, 10*time.Minute)
 			})
+			// v1.8.6: report the quota every time it changes, not only once at connect
+			if q, ok := s["quota"].(map[string]any); ok {
+				if qs := fmt.Sprintf("%v %v %v", q["limit"], q["remaining"], q["reset"]); qs != lastQuota && q["remaining"] != nil && fmt.Sprint(q["remaining"]) != "" {
+					lastQuota = qs
+					out("QUOTA %s", qs)
+				}
+			}
 			if time.Since(lastStat) > time.Second {
 				lastStat = time.Now()
 				out("STAT %v %v", s["up"], s["down"])
@@ -488,4 +494,22 @@ func tlsThroughSocks(socks, ip string, port int, sni string, timeout time.Durati
 	}
 	tc := tls.Client(c, &tls.Config{ServerName: sni})
 	return tc.Handshake()
+}
+
+// quotaLoop (v1.8.6): the service only reports the remaining data when asked, and the core asked once at
+// connect, so the app showed a frozen number. Ask again every `every` while the tunnel runs; the state
+// change it emits carries the new quota to onState, which prints a QUOTA line when the value moved.
+func quotaLoop(b *mobile.Backend, every time.Duration) {
+	fails := 0
+	for {
+		time.Sleep(every)
+		if _, err := call(b, "account"); err != nil {
+			fails++
+			if fails <= 3 || fails%10 == 0 {
+				out("LOG quota refresh failed #%d: %v", fails, err)
+			}
+			continue
+		}
+		fails = 0
+	}
 }

@@ -825,6 +825,7 @@ public class MainActivity extends Activity {
                 L.t("اشتراک گزارش کامل (تشخیصی + همهٔ گزارش)"),
                 L.t("ذخیرهٔ گزارش کامل در فایل"),
                 L.t("نمایش گزارش کامل"),
+                L.t("ارسال گزارش خطا (GitHub)"),
                 L.t("پاک کردن گزارش")};
         new AlertDialog.Builder(this).setTitle(L.t("خروجی گزارش (بدون کلید و توکن)"))
                 .setItems(items, (d, w) -> {
@@ -834,6 +835,7 @@ public class MainActivity extends Activity {
                         case 2: withText(true, s -> shareText(L.t("اشتراک گزارش کامل"), s)); break;
                         case 3: withText(true, this::saveToFile); break;
                         case 4: withText(true, this::showFullLog); break;
+                        case 5: Feedback.show(this); break;
                         default: confirmClearLog();
                     }
                 })

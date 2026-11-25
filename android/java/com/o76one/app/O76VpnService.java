@@ -1349,6 +1349,17 @@ public class O76VpnService extends VpnService {
         }
     }
 
+    /** v1.8.6: stop from the Quick Settings tile without a background startService (blocked on Android 8+) */
+    public static boolean stopFromOutside() {
+        final O76VpnService s = instance;
+        if (s == null) return false;
+        new android.os.Handler(android.os.Looper.getMainLooper()).post(() -> {
+            s.stopVpn(L.t("قطع شد"));
+            s.stopSelf();
+        });
+        return true;
+    }
+
     private void stopVpn(String msg) {
         stopping = true;
         killProc();

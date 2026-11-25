@@ -168,6 +168,13 @@ public class SettingsActivity extends Activity {
         updAuto.setOnCheckedChangeListener((cb, on) -> Updater.setAutoCheck(this, on));
         root.addView(updAuto);
 
+        // ---- v1.8.6 Feedback ----
+        root.addView(text(L.t("گزارش خطا و بازخورد"), 17, true));
+        root.addView(text(L.t("اگر وصل نمی‌شود یا مشکلی دارد، توضیح بدهید؛ گزارش اتصال (بدون کلید و توکن) پیوست می‌شود تا خطا را پیدا و رفع کنیم."), 13, false));
+        Button fbBtn = button(L.t("ارسال گزارش خطا"), ACCENT, R.drawable.ic_share);
+        fbBtn.setOnClickListener(v -> Feedback.show(this));
+        root.addView(MainActivity.Ui.row(this, fbBtn));
+
         // ---- v1.6 About ----
         root.addView(text(L.t("درباره"), 17, true));
         String ver = "";
