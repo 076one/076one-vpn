@@ -296,6 +296,17 @@ public final class Fox {
         void status(String s);
     }
 
+    /** v1.8.7: Persian/Arabic keyboards type ۰-۹ / ٠-٩, which the provider rejects; send ASCII digits, no spaces */
+    static String latin(String s) {
+        StringBuilder b = new StringBuilder();
+        for (char ch : s.trim().toCharArray()) {
+            if (ch >= '\u06F0' && ch <= '\u06F9') ch = (char) ('0' + (ch - '\u06F0'));
+            else if (ch >= '\u0660' && ch <= '\u0669') ch = (char) ('0' + (ch - '\u0660'));
+            if (!Character.isWhitespace(ch) && ch != '\u200C' && ch != '\u200F' && ch != '\u200E') b.append(ch);
+        }
+        return b.toString();
+    }
+
     /** blocking: signs in with the user's existing account; returns null on success or a Persian error */
     public static String login(Context c, String email, String password, LoginUi ui) {
         Process p = null;
@@ -313,13 +324,13 @@ public final class Fox {
                         String m = l.length() > 9 ? l.substring(9) : "";
                         String code = ui.askCode(m);
                         if (code == null) { p.destroy(); return L.t("ورود لغو شد"); }
-                        o.write((code.trim() + "\n").getBytes(StandardCharsets.UTF_8));
+                        o.write((latin(code) + "\n").getBytes(StandardCharsets.UTF_8));
                         o.flush();
                         ui.status(L.t("بررسی کد…"));
                     } else if (l.startsWith("CAPTCHA ")) {
                         String ans = ui.askCaptcha(new File(l.substring(8).trim()));
                         if (ans == null) { p.destroy(); return L.t("ورود لغو شد"); }
-                        o.write((ans.trim() + "\n").getBytes(StandardCharsets.UTF_8));
+                        o.write((latin(ans) + "\n").getBytes(StandardCharsets.UTF_8));
                         o.flush();
                         ui.status(L.t("بررسی تصویر…"));
                     } else if (l.startsWith("OK")) {

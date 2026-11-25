@@ -1,38 +1,38 @@
 {
-  "versionCode": 20,
-  "versionName": "1.8.6",
+  "versionCode": 22,
+  "versionName": "1.8.8",
   "minSdk": 21,
-  "apk": "release/076one-v1.8.6.apk",
-  "url": "https://github.com/076one/076one-vpn/raw/main/release/076one-v1.8.6.apk",
-  "size": 88848291,
-  "sha256": "22118bdde5d54459ce9e82ae731b81b417170afb7d4ec3edf7834f34d2430bf7",
+  "apk": "release/076one-v1.8.8.apk",
+  "url": "https://github.com/076one/076one-vpn/raw/main/release/076one-v1.8.8.apk",
+  "size": 88852387,
+  "sha256": "a5f401c8e438fcd635a99e9e0f5311a1a962574451676faac16638f3510be6fc",
   "signerSha256": "ec956e98caa16d80234dcb3f1e9b8b66fa9e14f8a78f71702142ad0024116ee8",
   "apks": [
     {
       "abi": "universal",
-      "apk": "release/076one-v1.8.6.apk",
-      "url": "https://github.com/076one/076one-vpn/raw/main/release/076one-v1.8.6.apk",
-      "size": 88848291,
-      "sha256": "22118bdde5d54459ce9e82ae731b81b417170afb7d4ec3edf7834f34d2430bf7"
+      "apk": "release/076one-v1.8.8.apk",
+      "url": "https://github.com/076one/076one-vpn/raw/main/release/076one-v1.8.8.apk",
+      "size": 88852387,
+      "sha256": "a5f401c8e438fcd635a99e9e0f5311a1a962574451676faac16638f3510be6fc"
     },
     {
       "abi": "arm64-v8a",
-      "apk": "release/076one-v1.8.6-arm64-v8a.apk",
-      "url": "https://github.com/076one/076one-vpn/raw/main/release/076one-v1.8.6-arm64-v8a.apk",
-      "size": 49817215,
-      "sha256": "d945bdb4a1f12f4df52b44d91f8259486cef7abafa1877aea78e12925dbbdd8b"
+      "apk": "release/076one-v1.8.8-arm64-v8a.apk",
+      "url": "https://github.com/076one/076one-vpn/raw/main/release/076one-v1.8.8-arm64-v8a.apk",
+      "size": 49825407,
+      "sha256": "7b9de46b18198c4b5eec54d6306bec03c4959d9c0383bf952f3e91e8eb2f2e91"
     },
     {
       "abi": "armeabi-v7a",
-      "apk": "release/076one-v1.8.6-armeabi-v7a.apk",
-      "url": "https://github.com/076one/076one-vpn/raw/main/release/076one-v1.8.6-armeabi-v7a.apk",
-      "size": 40343103,
-      "sha256": "d65af01d1bfb2ca5d5e880cfc5639f608a95832db5900e3648979b61e372cc3a"
+      "apk": "release/076one-v1.8.8-armeabi-v7a.apk",
+      "url": "https://github.com/076one/076one-vpn/raw/main/release/076one-v1.8.8-armeabi-v7a.apk",
+      "size": 40351295,
+      "sha256": "6c9fe78785a5481deddc3d4e743a99f2dedb13ec21c98a6a6dea7c50af70de75"
     }
   ],
   "notes": {
-    "fa": "۱.۸.۶: کلید «01» در منوی بالای گوشی (اندروید ۷ به بعد): لمس برای وصل/قطع با آخرین حالت، لمس طولانی برای باز کردن برنامه. دکمهٔ «گزارش مشکل» در تنظیمات و منوی گزارش (باز کردن Issue در GitHub). سهمیهٔ حالت Firefox دیگر ثابت نمی‌ماند و هر ۱۰ دقیقه به‌روز می‌شود.",
-    "en": "1.8.6: Quick Settings tile \"01\" (Android 7+): tap to connect/disconnect with the last mode, long-press to open the app. \"Report a problem\" in Settings and the log menu (opens a GitHub issue). Firefox mode quota no longer stays frozen; it refreshes every 10 minutes.",
-    "zh": "1.8.6：快速设置磁贴“01”（Android 7+）：轻点以上次的模式连接/断开，长按打开应用。设置和日志菜单中新增“报告问题”（打开 GitHub issue）。Firefox 模式的流量配额不再停滞，每 10 分钟刷新一次。"
+    "fa": "۱.۸.۸: ورود فایرفاکس: اعداد فارسی کد تأیید و تصویر امنیتی خودکار انگلیسی می‌شوند، کیبورد تصویر امنیتی انگلیسی است و ۱۰ دقیقه وقت دارید. اگر موزیلا به‌خاطر تلاش زیاد ورود را ببندد، ساعت باز شدنش نشان داده می‌شود و تا آن موقع تلاش دوباره گرفته نمی‌شود.",
+    "en": "1.8.8: Firefox sign-in: Persian digits in the email code and captcha are converted automatically, the captcha uses an English keyboard and you have 10 minutes. If Mozilla blocks sign-in after too many attempts, the unlock time is shown and retries are held until then.",
+    "zh": "1.8.8：Firefox 登录：邮件验证码和图片验证码中的波斯数字会自动转换，图片验证码使用英文键盘，并有 10 分钟时间。若 Mozilla 因尝试过多暂时阻止登录，将显示解锁时间，并在此之前不再重试。"
   }
 }

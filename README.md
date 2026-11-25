@@ -1,9 +1,9 @@
 # 076one VPN (Android)
 
-**Download v1.8.6** (versionCode 20, Android 5.0+):
-- [arm64-v8a (most phones)](https://github.com/076one/076one-vpn/raw/main/release/076one-v1.8.6-arm64-v8a.apk)
-- [armeabi-v7a (older 32-bit phones)](https://github.com/076one/076one-vpn/raw/main/release/076one-v1.8.6-armeabi-v7a.apk)
-- [universal (both)](https://github.com/076one/076one-vpn/raw/main/release/076one-v1.8.6.apk)
+**Download v1.8.8** (versionCode 22, Android 5.0+):
+- [arm64-v8a (most phones)](https://github.com/076one/076one-vpn/raw/main/release/076one-v1.8.8-arm64-v8a.apk)
+- [armeabi-v7a (older 32-bit phones)](https://github.com/076one/076one-vpn/raw/main/release/076one-v1.8.8-armeabi-v7a.apk)
+- [universal (both)](https://github.com/076one/076one-vpn/raw/main/release/076one-v1.8.8.apk)
 
 SHA-256 files are next to each APK in `release/`; `release/latest.json` feeds the in-app updater. Signing certificate SHA-256: `ec956e98caa16d80234dcb3f1e9b8b66fa9e14f8a78f71702142ad0024116ee8`.
 
@@ -435,7 +435,7 @@ Tests: `go test ./chain` (new `TestParseUpstream`, `TestUpstreamDialers`: HTTP C
 adapter), `go test ./o76core`; the live test `TestChainStallLive` now also takes `O76_CHAIN_UPSTREAM=<proxy url>` (Bridge +
 Psiphon; `O76_SS_PID` = the proxy's pid). `test/testproxy.py` now sends `Proxy-Authenticate` + `Connection: close` with its 407.
 
-## v1.8.6 (versionCode 20) — Quick Settings tile, problem reports, Firefox quota refresh
+## v1.8.8 (versionCode 22) — Quick Settings tile, problem reports, Firefox quota refresh
 
 - Quick Settings tile "01" (Android 7+): tap connects with the last-used mode or disconnects; long-press opens the app; the subtitle shows the state and mode (Android 10+). If VPN permission is missing, the tile opens the app.
 - "Report a problem" in Settings and in the log menu: opens a prefilled GitHub issue in the browser.

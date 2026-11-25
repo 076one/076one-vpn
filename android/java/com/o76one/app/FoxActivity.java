@@ -225,6 +225,11 @@ public class FoxActivity extends Activity {
             Toast.makeText(this, L.t("ایمیل و رمز را وارد کنید"), Toast.LENGTH_SHORT).show();
             return;
         }
+        long until = getSharedPreferences("fox_lock", MODE_PRIVATE).getLong("until", 0);
+        if (until > System.currentTimeMillis()) {
+            statusTv.setText(lockMsg(until));
+            return;
+        }
         busy = true;
         statusTv.setText(L.t("ورود به حساب فایرفاکس… (ممکن است تا یک دقیقه طول بکشد)"));
         render();
@@ -236,19 +241,42 @@ public class FoxActivity extends Activity {
                     return ask(L.t("کد تأیید"), msg, null);
                 }
 
+                int captchas = 0;
                 public String askCaptcha(File image) {
-                    return ask(L.t("تصویر امنیتی"), L.t("نوشتهٔ داخل تصویر را وارد کنید"), image);
+                    captchas++;
+                    String m = L.t("نوشتهٔ داخل تصویر را با حروف و اعداد انگلیسی وارد کنید");
+                    if (captchas > 1) m = L.t("جواب قبلی پذیرفته نشد؛ این تصویر جدید است.") + "\n" + m;
+                    return ask(L.t("تصویر امنیتی"), m, image);
                 }
 
                 public void status(String s) { runOnUiThread(() -> statusTv.setText(s)); }
             });
             busy = false;
+            final String shown = rateLimited(err);
             runOnUiThread(() -> {
                 passEt.setText("");
-                statusTv.setText(err == null ? L.t("ورود موفق ✓") : L.t("خطا: ") + err);
+                statusTv.setText(err == null ? L.t("ورود موفق ✓") : shown != null ? shown : L.t("خطا: ") + err);
                 render();
             });
         }).start();
+    }
+
+    /** Mozilla "too many requests": remember the unlock time and block retries until then. */
+    private String rateLimited(String err) {
+        if (err == null || !err.toLowerCase(java.util.Locale.ROOT).contains("too many")) return null;
+        long secs = 15 * 60;
+        java.util.regex.Matcher m = java.util.regex.Pattern.compile("retryAfter=(\\d+)").matcher(err);
+        if (m.find()) { try { secs = Long.parseLong(m.group(1)); } catch (Exception ignored) {} }
+        long until = System.currentTimeMillis() + secs * 1000L;
+        getSharedPreferences("fox_lock", MODE_PRIVATE).edit().putLong("until", until).apply();
+        return lockMsg(until);
+    }
+
+    private String lockMsg(long until) {
+        String t = new java.text.SimpleDateFormat("HH:mm", java.util.Locale.US).format(new java.util.Date(until));
+        long min = Math.max(1, (until - System.currentTimeMillis() + 59999) / 60000);
+        return L.t("موزیلا به‌خاطر تلاش‌های زیاد ورود را موقتاً بسته است. تا ساعت ") + t
+                + L.t(" (حدود ") + min + L.t(" دقیقه) دوباره تلاش نکنید؛ هر تلاش زودتر قفل را طولانی‌تر می‌کند.");
     }
 
     /** blocking dialog from a worker thread; null = cancelled */
@@ -270,7 +298,7 @@ public class FoxActivity extends Activity {
                     box.addView(iv, new LinearLayout.LayoutParams(-1, -2));
                 }
             }
-            EditText e = field("", image == null ? InputType.TYPE_CLASS_NUMBER : InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS);
+            EditText e = field("", image == null ? InputType.TYPE_CLASS_NUMBER : InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD | InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS);
             box.addView(e, new LinearLayout.LayoutParams(-1, -2));
             new AlertDialog.Builder(this).setTitle(title).setView(box).setCancelable(false)
                     .setPositiveButton(L.t("تأیید"), (d, w) -> { res.set(e.getText().toString()); done.countDown(); })

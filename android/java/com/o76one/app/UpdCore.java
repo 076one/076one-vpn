@@ -56,6 +56,13 @@ public final class UpdCore {
         public int versionCode, minSdk;
         public String versionName = "", abi = "", url = "", sha256 = "", notes = "", file = "";
         public long size;
+        /** v1.8.7 delta updates: patches from earlier APKs (by their SHA-256) to this APK */
+        public final java.util.List<PatchRef> patches = new java.util.ArrayList<>();
+    }
+
+    public static final class PatchRef {
+        public String fromSha256 = "", url = "", sha256 = "";
+        public long size;
     }
 
     /** "release/x.apk" -> RAW + path; absolute http(s) URLs stay as they are */
@@ -104,6 +111,18 @@ public final class UpdCore {
         in.sha256 = pick.optString("sha256", "").trim().toLowerCase(Locale.US);
         if (!in.sha256.matches("[0-9a-f]{64}")) throw new Exception("latest.json: bad sha256");
         in.size = pick.optLong("size", 0);
+        JSONArray ps = pick.optJSONArray("patches");
+        if (ps != null) for (int i = 0; i < ps.length(); i++) {
+            JSONObject q = ps.optJSONObject(i);
+            if (q == null) continue;
+            PatchRef r = new PatchRef();
+            r.fromSha256 = q.optString("fromSha256", "").trim().toLowerCase(Locale.US);
+            r.sha256 = q.optString("sha256", "").trim().toLowerCase(Locale.US);
+            String pu = q.optString("url", "");
+            r.url = pu.isEmpty() ? rawUrl(q.optString("file", "")) : rawUrl(pu);
+            r.size = q.optLong("size", 0);
+            if (r.fromSha256.matches("[0-9a-f]{64}") && r.sha256.matches("[0-9a-f]{64}") && !r.url.equals(RAW)) in.patches.add(r);
+        }
         return in;
     }
 
@@ -327,6 +346,67 @@ public final class UpdCore {
     }
 
     // ---------------- checks ----------------
+    /** v1.8.7: the patch whose source is the installed APK (by SHA-256), or null */
+    public static PatchRef patchFor(Info in, String installedSha) {
+        if (installedSha == null) return null;
+        for (PatchRef r : in.patches) if (r.fromSha256.equalsIgnoreCase(installedSha)) return r;
+        return null;
+    }
+
+    /**
+     * v1.8.7: rebuilds the new APK from the installed one and a patch made by tools/mkpatch.py
+     * ("O76P1\n" + u64 size + sha256 + zlib(ops); C = copy u64 off u64 len, I = insert u64 len + bytes, E = end).
+     * Throws when the result's size or SHA-256 is not what the patch says; the caller then downloads the full APK.
+     */
+    public static void applyPatch(File old, File patch, File out) throws Exception {
+        try (java.io.DataInputStream pin = new java.io.DataInputStream(new java.io.BufferedInputStream(new java.io.FileInputStream(patch)));
+             java.io.RandomAccessFile src = new java.io.RandomAccessFile(old, "r");
+             OutputStream o = new java.io.BufferedOutputStream(new java.io.FileOutputStream(out), 1 << 16)) {
+            byte[] magic = new byte[6];
+            pin.readFully(magic);
+            if (!"O76P1\n".equals(new String(magic, "US-ASCII"))) throw new Exception("bad patch");
+            long size = le64(pin);
+            byte[] want = new byte[32];
+            pin.readFully(want);
+            java.security.MessageDigest md = java.security.MessageDigest.getInstance("SHA-256");
+            java.io.DataInputStream ops = new java.io.DataInputStream(new java.io.BufferedInputStream(new java.util.zip.InflaterInputStream(pin), 1 << 16));
+            byte[] buf = new byte[1 << 16];
+            long written = 0, srcLen = src.length();
+            for (;;) {
+                int t = ops.read();
+                if (t == 'E') break;
+                if (t == 'C') {
+                    long off = le64(ops), n = le64(ops);
+                    if (off < 0 || n < 0 || off + n > srcLen) throw new Exception("bad patch copy");
+                    src.seek(off);
+                    while (n > 0) {
+                        int k = (int) Math.min(buf.length, n);
+                        src.readFully(buf, 0, k);
+                        o.write(buf, 0, k); md.update(buf, 0, k);
+                        n -= k; written += k;
+                    }
+                } else if (t == 'I') {
+                    long n = le64(ops);
+                    if (n < 0 || written + n > size) throw new Exception("bad patch insert");
+                    while (n > 0) {
+                        int k = (int) Math.min(buf.length, n);
+                        ops.readFully(buf, 0, k);
+                        o.write(buf, 0, k); md.update(buf, 0, k);
+                        n -= k; written += k;
+                    }
+                } else throw new Exception("bad patch op");
+                if (written > size) throw new Exception("patch too long");
+            }
+            if (written != size || !java.security.MessageDigest.isEqual(md.digest(), want)) throw new Exception("patch result mismatch");
+        }
+    }
+
+    static long le64(java.io.DataInputStream in) throws IOException {
+        long v = 0;
+        for (int i = 0; i < 8; i++) v |= ((long) in.readUnsignedByte()) << (8 * i);
+        return v;
+    }
+
     public static String hex(byte[] b) {
         StringBuilder sb = new StringBuilder();
         for (byte x : b) sb.append(String.format(Locale.US, "%02x", x & 0xff));

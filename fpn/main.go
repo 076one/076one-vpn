@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
 // libfpn: 076one "Firefox" mode (v1.7). A small command-line front for the Predator VPN core
-// (erfan-tahvilian/PredatorVPN v2.0.7, GPL-3.0-or-later, vendored unmodified in third_party/predator-core).
+// (erfan-tahvilian/PredatorVPN v2.0.7, GPL-3.0-or-later, vendored in third_party/predator-core; modified by 076one, see third_party/predator-core/MODIFICATIONS-076one.md).
 // It signs in to the user's OWN Firefox account and runs the authenticated HTTP/2 / HTTP/3 CONNECT tunnel as a local
 // SOCKS5 server; the app carries the Android TUN into it with `o76core svpn -dnsudp`.
 //
@@ -138,7 +138,7 @@ func (h *host) SolveCaptcha(image string) (string, error) {
 		return "", err
 	}
 	out("CAPTCHA %s", p)
-	return readLine(170 * time.Second)
+	return readLine(10 * time.Minute)
 }
 
 type envelope struct {

@@ -184,7 +184,7 @@ public class SettingsActivity extends Activity {
                 + L.t("فقط arm64): ") + Aether.REPO + L.t(" — کد منبع همین نسخه: ") + Aether.REPO + "/tree/v" + Aether.VERSION, 13, false);
         ae.setTextIsSelectable(true);
         root.addView(ae);
-        TextView fx = text(L.t("حالت Firefox از هستهٔ Predator VPN v") + Fox.VERSION + L.t(" (erfan-tahvilian) استفاده می‌کند (مجوز GPL-3.0، بدون تغییر): ")
+        TextView fx = text(L.t("حالت Firefox از هستهٔ Predator VPN v") + Fox.VERSION + L.t(" (erfan-tahvilian) استفاده می‌کند (مجوز GPL-3.0؛ با تغییرات کوچک در ورود و زمان‌بندی که سورسش در گیت‌هاب منتشر شده): ")
                 + Fox.REPO + L.t(" — وابسته به موزیلا نیست؛ فقط با حساب خود شما وارد می‌شود."), 13, false);
         fx.setTextIsSelectable(true);
         root.addView(fx);

@@ -179,6 +179,9 @@ func (b *Backend) jsonRequest(ctx context.Context, address, method string, body 
 			if message == "" {
 				message = fmt.Sprintf("Service request failed (HTTP %d)", status)
 			}
+			if ra := int64(num(data, "retryAfter")); ra > 0 {
+				message = fmt.Sprintf("%s [retryAfter=%d]", message, ra)
+			}
 			return nil, h, &serviceError{status, int(num(data, "errno")), message}
 		}
 		return data, h, nil
@@ -435,7 +438,7 @@ func solvePow(base, hash string) (string, error) {
 	return "", errors.New("Unable to complete service verification")
 }
 func (b *Backend) challenge(ctx context.Context) error {
-	ctx, stop := context.WithTimeout(ctx, 180*time.Second)
+	ctx, stop := context.WithTimeout(ctx, 15*time.Minute) // v1.8.7: a human answers the image; 3 min was too short
 	defer stop()
 	jar, err := cookiejar.New(nil)
 	if err != nil {

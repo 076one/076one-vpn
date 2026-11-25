@@ -213,6 +213,44 @@ public final class Updater {
                     if (!have) //noinspection ResultOfMethodCallIgnored
                         f.delete();
                 }
+                // v1.8.7: delta update. Rebuild the new APK from the installed one when latest.json has a patch for it.
+                if (!have && !in.patches.isEmpty()) {
+                    File patch = new File(apkDir(app), "update.o76p");
+                    try {
+                        String mine = UpdCore.sha256(new File(app.getApplicationInfo().sourceDir));
+                        final UpdCore.PatchRef pr = UpdCore.patchFor(in, mine);
+                        if (pr != null) {
+                            final long t0 = System.currentTimeMillis();
+                            String route = viaBest(port -> {
+                                try (FileOutputStream out = new FileOutputStream(patch)) {
+                                    final String via = port > 0 ? L.t(" (از داخل تونل)") : L.t(" (مستقیم)");
+                                    UpdCore.download(pr.url, port, out, pr.size, (done, total) -> h.post(() -> {
+                                        if (total > 0) pb.setProgress((int) (done * 1000 / total));
+                                        long secs = Math.max(1, (System.currentTimeMillis() - t0) / 1000);
+                                        tv.setText(L.t("دانلود فقط تغییرات") + via + ": " + Core.fmtBytes(done) + (total > 0 ? " / " + Core.fmtBytes(total) : "")
+                                                + " — " + Core.fmtBytes(done / secs) + "/s");
+                                    }), () -> cancel[0]);
+                                }
+                            });
+                            if (!UpdCore.sha256(patch).equalsIgnoreCase(pr.sha256)) throw new Exception("patch sha256");
+                            h.post(() -> tv.setText(L.t("ساختن نسخهٔ جدید از نسخهٔ نصب‌شده…")));
+                            UpdCore.applyPatch(new File(app.getApplicationInfo().sourceDir), patch, part);
+                            if (!part.renameTo(f)) throw new Exception("rename failed");
+                            have = UpdCore.sha256(f).equalsIgnoreCase(in.sha256);
+                            Core.log(L.t("به‌روزرسانی: فقط تغییرات دانلود شد [") + route + "] " + patch.length() + " bytes" + (have ? "" : " — mismatch"));
+                            if (!have) //noinspection ResultOfMethodCallIgnored
+                                f.delete();
+                        }
+                    } catch (Exception e) {
+                        if (cancel[0]) throw e;
+                        Core.log(L.t("به‌روزرسانی: دانلود تغییرات نشد، دانلود کامل — ") + e.getMessage());
+                        //noinspection ResultOfMethodCallIgnored
+                        part.delete();
+                    } finally {
+                        //noinspection ResultOfMethodCallIgnored
+                        patch.delete();
+                    }
+                }
                 if (!have) {
                     final long t0 = System.currentTimeMillis();
                     String route = viaBest(port -> {
