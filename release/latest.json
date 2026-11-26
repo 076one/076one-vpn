@@ -1,38 +1,38 @@
 {
-  "versionCode": 22,
-  "versionName": "1.8.8",
+  "versionCode": 27,
+  "versionName": "1.8.13",
   "minSdk": 21,
-  "apk": "release/076one-v1.8.8.apk",
-  "url": "https://github.com/076one/076one-vpn/raw/main/release/076one-v1.8.8.apk",
-  "size": 88852387,
-  "sha256": "a5f401c8e438fcd635a99e9e0f5311a1a962574451676faac16638f3510be6fc",
+  "apk": "076one-v1.8.13.apk",
+  "url": "https://github.com/076one/076one-vpn/releases/download/v1.8.13/076one-v1.8.13.apk",
+  "size": 89384867,
+  "sha256": "af1ce1df2cc9f0ccf1b0319a17cfb47c0318f2ac9bd27d4e32a6ec4f0911e687",
   "signerSha256": "ec956e98caa16d80234dcb3f1e9b8b66fa9e14f8a78f71702142ad0024116ee8",
   "apks": [
     {
       "abi": "universal",
-      "apk": "release/076one-v1.8.8.apk",
-      "url": "https://github.com/076one/076one-vpn/raw/main/release/076one-v1.8.8.apk",
-      "size": 88852387,
-      "sha256": "a5f401c8e438fcd635a99e9e0f5311a1a962574451676faac16638f3510be6fc"
+      "apk": "076one-v1.8.13.apk",
+      "url": "https://github.com/076one/076one-vpn/releases/download/v1.8.13/076one-v1.8.13.apk",
+      "size": 89384867,
+      "sha256": "af1ce1df2cc9f0ccf1b0319a17cfb47c0318f2ac9bd27d4e32a6ec4f0911e687"
     },
     {
       "abi": "arm64-v8a",
-      "apk": "release/076one-v1.8.8-arm64-v8a.apk",
-      "url": "https://github.com/076one/076one-vpn/raw/main/release/076one-v1.8.8-arm64-v8a.apk",
-      "size": 49825407,
-      "sha256": "7b9de46b18198c4b5eec54d6306bec03c4959d9c0383bf952f3e91e8eb2f2e91"
+      "apk": "076one-v1.8.13-arm64-v8a.apk",
+      "url": "https://github.com/076one/076one-vpn/releases/download/v1.8.13/076one-v1.8.13-arm64-v8a.apk",
+      "size": 49960575,
+      "sha256": "d59f8f2cd1ba95f50411f4b3e04f036517828bff175719dc0ca5c40bb8537883"
     },
     {
       "abi": "armeabi-v7a",
-      "apk": "release/076one-v1.8.8-armeabi-v7a.apk",
-      "url": "https://github.com/076one/076one-vpn/raw/main/release/076one-v1.8.8-armeabi-v7a.apk",
-      "size": 40351295,
-      "sha256": "6c9fe78785a5481deddc3d4e743a99f2dedb13ec21c98a6a6dea7c50af70de75"
+      "apk": "076one-v1.8.13-armeabi-v7a.apk",
+      "url": "https://github.com/076one/076one-vpn/releases/download/v1.8.13/076one-v1.8.13-armeabi-v7a.apk",
+      "size": 40732223,
+      "sha256": "febeb89f500a68c115fd624daee58fb9dcc0d431e6a7a9b5f9f52f63b952bddf"
     }
   ],
   "notes": {
-    "fa": "۱.۸.۸: ورود فایرفاکس: اعداد فارسی کد تأیید و تصویر امنیتی خودکار انگلیسی می‌شوند، کیبورد تصویر امنیتی انگلیسی است و ۱۰ دقیقه وقت دارید. اگر موزیلا به‌خاطر تلاش زیاد ورود را ببندد، ساعت باز شدنش نشان داده می‌شود و تا آن موقع تلاش دوباره گرفته نمی‌شود.",
-    "en": "1.8.8: Firefox sign-in: Persian digits in the email code and captcha are converted automatically, the captcha uses an English keyboard and you have 10 minutes. If Mozilla blocks sign-in after too many attempts, the unlock time is shown and retries are held until then.",
-    "zh": "1.8.8：Firefox 登录：邮件验证码和图片验证码中的波斯数字会自动转换，图片验证码使用英文键盘，并有 10 分钟时间。若 Mozilla 因尝试过多暂时阻止登录，将显示解锁时间，并在此之前不再重试。"
+    "fa": "۱.۸.۱۳ (پایدار، بر پایهٔ ۱.۸.۵): دکمهٔ «ساخت حساب فایرفاکس»؛ ثبت‌نام WARP از داخل تونل Firefox (اول با Firefox وصل شوید)؛ کاشی وصل/قطع در منوی بالای گوشی.",
+    "en": "1.8.13 (stable, based on 1.8.5): \"Create Firefox account\" button; WARP registration through the Firefox tunnel (connect Firefox first); Quick Settings tile to connect/disconnect.",
+    "zh": "1.8.13（稳定版，基于 1.8.5）：新增“创建 Firefox 帐户”按钮；通过 Firefox 隧道注册 WARP（先连接 Firefox）；快速设置磁贴一键连接/断开。"
   }
 }
